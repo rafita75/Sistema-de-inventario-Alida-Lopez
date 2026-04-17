@@ -1,0 +1,207 @@
+// server/index.js
+// ============================================
+// CONFIGURACIÓN INICIAL
+// ============================================
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const http = require('http');
+const socketIo = require('socket.io');
+
+const connectDB = require('./db');
+const { generalLimiter } = require('./shared/middleware/rateLimit');
+
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+const app = express();
+connectDB();
+
+const server = http.createServer(app);
+
+// ============================================
+// CONFIGURACIÓN DE SOCKET.IO
+// ============================================
+const io = socketIo(server, {
+  cors: {
+    origin: [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      process.env.FRONTEND_URL
+    ].filter(Boolean),
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// ============================================
+// MIDDLEWARES DE SEGURIDAD
+// ============================================
+app.use(helmet());
+
+app.use(cors({
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn('❌ CORS bloqueado para:', origin);
+      callback(new Error('No permitido por CORS'));
+    }
+  },
+  credentials: true
+}));
+
+app.use(express.json());
+
+app.use((req, res, next) => {
+  console.log(`📌 ${req.method} ${req.url}`);
+  next();
+});
+
+app.use('/api', generalLimiter);
+
+// ============================================
+// INICIALIZAR LISTENERS DE MÓDULOS
+// ============================================
+try {
+  const { setupInventoryListeners } = require('./modules/inventory/listeners');
+  setupInventoryListeners();
+  console.log('✅ Inventory listeners activados');
+} catch (error) {
+  console.log('⚠️ Inventory listeners no disponibles:', error.message);
+}
+
+try {
+  const { setupAccountingListeners } = require('./modules/accounting/listeners');
+  setupAccountingListeners();
+  console.log('✅ Accounting listeners activados');
+} catch (error) {
+  console.log('⚠️ Accounting listeners no disponibles:', error.message);
+}
+
+// ============================================
+// RUTAS
+// ============================================
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Servidor de Gestión (Inventario/POS/Contabilidad) funcionando 🚀' });
+});
+
+// Auth & Core
+app.use('/api/auth', require('./modules/login/routes/auth'));
+app.use('/api/config', require('./modules/core/routes/config'));
+
+// Gestión (Inventario, Productos, Categorías, Proveedores, Marcas)
+app.use('/api/categories', require('./modules/inventory/routes/categories'));
+app.use('/api/products', require('./modules/inventory/routes/products'));
+app.use('/api/inventory', require('./modules/inventory/routes/inventory'));
+app.use('/api/suppliers', require('./modules/inventory/routes/suppliers'));
+app.use('/api/brands', require('./modules/inventory/routes/brands'));
+
+// Contabilidad y POS
+app.use('/api/accounting', require('./modules/accounting/routes/accounting'));
+app.use('/api/pos', require('./modules/pos/routes/pos'));
+app.use('/api/employees', require('./modules/admin/routes/employees'));
+app.use('/api/audit', require('./modules/admin/routes/audit'));
+
+// ============================================
+// SOCKET.IO - USUARIOS CONECTADOS Y ESCÁNER MÓVIL
+// ============================================
+const connectedUsers = new Map();
+
+io.on('connection', (socket) => {
+  console.log('🔌 Cliente conectado:', socket.id);
+
+  // Registro general de notificaciones
+  socket.on('register-user', (userId) => {
+    if (userId) {
+      connectedUsers.set(userId.toString(), socket.id);
+      socket.join(`user-${userId}`);
+      console.log(`✅ Usuario ${userId} conectado`);
+    }
+  });
+
+  // ==========================================
+  // EMPAREJAMIENTO PC-MÓVIL (ESCÁNER)
+  // ==========================================
+  // La PC crea o se une a una sala de sesión
+  socket.on('join-pos-session', (sessionId) => {
+    socket.join(`pos-${sessionId}`);
+    console.log(`💻 PC unida a sesión POS: ${sessionId}`);
+  });
+
+  // El Celular se une a la misma sala usando el QR
+  socket.on('join-scanner-session', (sessionId) => {
+    socket.join(`pos-${sessionId}`);
+    console.log(`📱 Móvil unido a sesión POS: ${sessionId}`);
+    // Avisar a la PC que el celular está listo
+    socket.to(`pos-${sessionId}`).emit('scanner-connected', { success: true });
+  });
+
+  // El Celular escanea un código y lo envía a la PC
+  socket.on('send-barcode', (data) => {
+    const { sessionId, barcode } = data;
+    console.log(`📡 Código de barras ${barcode} enviado a sesión ${sessionId}`);
+    // Reenviar a todos en la sala (incluyendo la PC)
+    socket.to(`pos-${sessionId}`).emit('barcode-received', { barcode });
+  });
+
+  socket.on('disconnect', () => {
+    console.log('❌ Cliente desconectado:', socket.id);
+
+    for (let [userId, socketId] of connectedUsers.entries()) {
+      if (socketId === socket.id) {
+        connectedUsers.delete(userId);
+        console.log(`🧹 Usuario ${userId} eliminado`);
+        break;
+      }
+    }
+  });
+});
+
+// ============================================
+// FUNCIÓN GLOBAL DE NOTIFICACIONES
+// ============================================
+const sendNotification = (userId, notification) => {
+  const socketId = connectedUsers.get(userId);
+
+  if (socketId) {
+    io.to(socketId).emit('new-notification', notification);
+    console.log(`📨 Notificación enviada a ${userId}`);
+    return true;
+  }
+
+  console.log(`⚠️ Usuario ${userId} no conectado`);
+  return false;
+};
+
+app.set('sendNotification', sendNotification);
+app.set('io', io);
+
+// ============================================
+// MANEJO DE ERRORES GLOBAL
+// ============================================
+app.use((err, req, res, next) => {
+  console.error('💥 Error:', err.message);
+  res.status(500).json({
+    error: 'Error interno del servidor'
+  });
+});
+
+// ============================================
+// SERVIDOR
+// ============================================
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, () => {
+  console.log(`🚀 Servidor de Gestión corriendo en puerto ${PORT}`);
+});
