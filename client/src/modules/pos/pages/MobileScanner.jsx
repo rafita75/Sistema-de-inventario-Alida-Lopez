@@ -11,13 +11,16 @@ export default function MobileScanner() {
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
   const html5QrCodeRef = useRef(null);
+  
+  // Referencias para evitar duplicados rápidos
+  const lastScannedCodeRef = useRef(null);
+  const lastScannedTimeRef = useRef(0);
 
   useEffect(() => {
     if (user?.id) {
       console.log('🔗 Conectando escáner para usuario:', user.id);
       const socket = initSocket(user.id);
       
-      // Forzar unión a sala si ya estaba conectado
       if (socket && socket.connected) {
         socket.emit('register-user', user.id);
       }
@@ -33,7 +36,7 @@ export default function MobileScanner() {
       html5QrCodeRef.current = html5QrCode;
 
       const config = { 
-        fps: 10, 
+        fps: 15, 
         qrbox: { width: 280, height: 180 },
         aspectRatio: 1.0
       };
@@ -42,9 +45,22 @@ export default function MobileScanner() {
         { facingMode: "environment" }, 
         config, 
         (decodedText) => {
+          const now = Date.now();
+          
+          // LÓGICA DE COOLDOWN (2 SEGUNDOS)
+          // Evita que el mismo código se escanee múltiples veces por accidente
+          if (decodedText === lastScannedCodeRef.current && (now - lastScannedTimeRef.current) < 2000) {
+            return; // Ignorar lectura duplicada
+          }
+
+          lastScannedCodeRef.current = decodedText;
+          lastScannedTimeRef.current = now;
+
           setLastScanned(decodedText);
           sendToPC(decodedText);
-          if (navigator.vibrate) navigator.vibrate(100);
+          
+          // Feedback táctil
+          if (navigator.vibrate) navigator.vibrate(150);
         }
       );
 
@@ -59,9 +75,13 @@ export default function MobileScanner() {
 
   const stopScanner = async () => {
     if (html5QrCodeRef.current) {
-      await html5QrCodeRef.current.stop();
-      setIsScanning(false);
-      setStatus('Escáner detenido');
+      try {
+        await html5QrCodeRef.current.stop();
+        setIsScanning(false);
+        setStatus('Escáner detenido');
+      } catch (err) {
+        console.error("Error deteniendo scanner:", err);
+      }
     }
   };
 
@@ -75,14 +95,12 @@ export default function MobileScanner() {
       console.log('📡 Enviado a PC:', barcode);
     } else {
       setStatus('Desconectado de la PC ❌');
-      // Intentar reconectar
       initSocket(user.id);
     }
   };
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col font-sans">
-      {/* Header */}
       <div className="p-4 bg-gray-900 border-b border-gray-800 flex justify-between items-center sticky top-0 z-50">
         <div>
           <h1 className="text-lg font-bold text-green-500">Librería A&C</h1>
@@ -105,7 +123,6 @@ export default function MobileScanner() {
           </div>
         )}
 
-        {/* Contenedor del Lector */}
         <div className="relative w-full max-w-sm aspect-square bg-gray-900 rounded-3xl overflow-hidden border-2 border-gray-800 shadow-2xl">
           <div id="reader" className="w-full h-full"></div>
           
@@ -113,7 +130,7 @@ export default function MobileScanner() {
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80 backdrop-blur-sm p-8 text-center">
               <div className="text-6xl mb-4">📷</div>
               <h2 className="text-xl font-bold mb-2">Escáner Desactivado</h2>
-              <p className="text-gray-400 text-sm mb-6">Toca el botón para usar la cámara y escanear productos</p>
+              <p className="text-gray-400 text-sm mb-6">Toca el botón para empezar a escanear</p>
               <button 
                 onClick={startScanner}
                 className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform active:scale-95"
@@ -129,7 +146,7 @@ export default function MobileScanner() {
             <p className="text-gray-500 text-center text-xs uppercase tracking-widest mb-2 font-bold">Último detectado</p>
             <div className="bg-gradient-to-r from-green-900 to-green-800 text-green-100 py-4 px-6 rounded-2xl border border-green-600 text-center shadow-xl">
               <span className="text-3xl font-mono font-bold">{lastScanned}</span>
-              <p className="text-[10px] mt-1 text-green-400">ENVIADO AUTOMÁTICAMENTE A LA PC</p>
+              <p className="text-[10px] mt-1 text-green-400">ENVIADO A LA PC (ESPERA 2S)</p>
             </div>
           </div>
         )}
