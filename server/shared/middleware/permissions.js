@@ -17,9 +17,11 @@ const requirePermission = (permission) => {
         // Empleado necesita el permiso específico
         if (req.user.role === 'employee') {
           const user = await User.findById(req.user.id);
-          if (user && user.permissions && user.permissions[permission] === true) {
+          // Los permisos están en la raíz del usuario (ej: user.viewProducts)
+          if (user && user[permission] === true) {
             return next();
           }
+          console.warn(`🚫 Permiso denegado: Usuario ${user?.name} intentó acceder a ${permission}`);
           return res.status(403).json({ error: 'No tienes permiso para realizar esta acción' });
         }
         

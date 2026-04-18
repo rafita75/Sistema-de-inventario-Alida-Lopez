@@ -93,8 +93,9 @@ router.get("/products/search", auth, async (req, res) => {
 
     if (q) {
       query.$or = [
-        { $text: { $search: q } },
-        { name: { $regex: q, $options: "i" } }
+        { name: { $regex: q, $options: "i" } },
+        { sku: { $regex: q, $options: "i" } },
+        { barcode: { $regex: q, $options: "i" } }
       ];
     }
 
@@ -105,10 +106,10 @@ router.get("/products/search", auth, async (req, res) => {
     const productsWithVariants = products.map(product => ({
       _id: product._id,
       name: product.name,
-      price: product.price,
-      stock: product.stock,
-      sku: product.sku,
-      barcode: product.barcode,
+      price: product.price || 0,
+      stock: product.stock || 0,
+      sku: product.sku || '',
+      barcode: product.barcode || '',
       hasVariants: product.hasVariants || false,
       variantsCount: product.variants?.length || 0,
       variants: product.variants || []
@@ -116,7 +117,7 @@ router.get("/products/search", auth, async (req, res) => {
 
     res.json(productsWithVariants);
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error en búsqueda POS:", error);
     res.status(500).json({ error: "Error al buscar productos" });
   }
 });
@@ -253,37 +254,45 @@ router.post("/sale", auth, async (req, res) => {
       createdAt: new Date()
     });
 
-    // 4. Notificaciones (socket.io)
-    const sendNotification = req.app.get('sendNotification');
-    const User = mongoose.model('User');
-    const admins = await User.find({ role: 'admin' });
-    
-    const notification = {
-      id: sale._id,
-      type: 'sale',
-      title: esDeuda ? '📝 Nueva venta a crédito' : '💰 Nueva venta registrada',
-      body: `${sale.clienteNombre || 'Mostrador'} - Total: Q${sale.total.toLocaleString()}${esDeuda ? ' (Crédito)' : ''}`,
-      data: {
-        saleNumber: sale.saleNumber,
-        total: sale.total,
-        items: sale.items.length,
-        url: '/inventario'
-      },
-      timestamp: new Date()
-    };
-    
-    for (const admin of admins) {
-      sendNotification(admin._id.toString(), notification);
+    // 4. Notificaciones (socket.io y Push)
+    try {
+      const sendNotification = req.app.get('sendNotification');
+      const User = mongoose.model('User');
+      const admins = await User.find({ role: 'admin' });
       
-      // ENVIAR PUSH REAL (Segundo plano)
-      sendPushNotification(admin._id.toString(), {
-        title: notification.title,
-        body: notification.body,
-        icon: '/logo1.png',
+      const notification = {
+        id: sale._id,
+        type: 'sale',
+        title: esDeuda ? '📝 Nueva venta a crédito' : '💰 Nueva venta registrada',
+        body: `${sale.clienteNombre || 'Mostrador'} - Total: Q${sale.total.toLocaleString()}${esDeuda ? ' (Crédito)' : ''}`,
         data: {
+          saleNumber: sale.saleNumber,
+          total: sale.total,
+          items: sale.items.length,
           url: '/inventario'
+        },
+        timestamp: new Date()
+      };
+      
+      for (const admin of admins) {
+        // Notificación en tiempo real (Socket)
+        if (sendNotification) {
+          sendNotification(admin._id.toString(), notification);
         }
-      });
+        
+        // ENVIAR PUSH REAL (Segundo plano)
+        sendPushNotification(admin._id.toString(), {
+          title: notification.title,
+          body: notification.body,
+          icon: '/logo1.png',
+          data: {
+            url: '/inventario'
+          }
+        }).catch(err => console.error('Error enviando push individual:', err.message));
+      }
+    } catch (notifError) {
+      console.error('⚠️ Error no crítico en sistema de notificaciones:', notifError.message);
+      // No lanzamos error, permitimos que la respuesta de éxito continúe
     }
 
     res.json({

@@ -18,11 +18,10 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
     const query = {};
     
     if (search) {
-      // Intentar búsqueda de texto completa primero
       query.$or = [
-        { $text: { $search: search } },
-        { barcode: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } },
+        { barcode: { $regex: search, $options: 'i' } }
       ];
     }
     
