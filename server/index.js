@@ -22,51 +22,49 @@ connectDB();
 const server = http.createServer(app);
 
 // ============================================
-// CONFIGURACIÓN DE SOCKET.IO
+// CONFIGURACIÓN DE ORÍGENES PERMITIDOS (CORS)
 // ============================================
-const io = socketIo(server, {
-  cors: {
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      process.env.FRONTEND_URL
-    ].filter(Boolean),
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
-
-// ============================================
-// MIDDLEWARES DE SEGURIDAD
-// ============================================
-app.use(helmet());
-
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   process.env.FRONTEND_URL?.replace(/\/$/, ''),
-  'https://libreria-ac.netlify.app' // URL explícita para asegurar
+  'https://libreria-ac.netlify.app'
 ].filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    // Permitir peticiones sin origen (como apps móviles o curl)
     if (!origin) return callback(null, true);
-
     const normalizedOrigin = origin.replace(/\/$/, '');
-    
     if (allowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
     } else {
-      console.warn(`❌ CORS bloqueado para: ${origin}. Permitidos:`, allowedOrigins);
-      callback(null, false); // No permitir, pero no lanzar error para que cors maneje la cabecera
+      console.warn(`❌ CORS bloqueado para: ${origin}`);
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Forwarded-For']
+};
 
+// APLICAR CORS INMEDIATAMENTE (Antes que cualquier otro middleware)
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Manejar pre-flight de todas las rutas
+
+// ============================================
+// CONFIGURACIÓN DE SOCKET.IO
+// ============================================
+const io = socketIo(server, {
+  cors: corsOptions, // 👈 Usar la misma configuración que express
+  transports: ['websocket', 'polling']
+});
+
+// ============================================
+// MIDDLEWARES DE SEGURIDAD Y PARSEO
+// ============================================
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(express.json());
 
 app.use((req, res, next) => {
