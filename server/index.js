@@ -152,10 +152,18 @@ io.on('connection', (socket) => {
 
   // El Celular escanea un código y lo envía a la PC
   socket.on('send-barcode', (data) => {
-    const { sessionId, barcode } = data;
-    console.log(`📡 Código de barras ${barcode} enviado a sesión ${sessionId}`);
-    // Reenviar a todos en la sala (incluyendo la PC)
-    socket.to(`pos-${sessionId}`).emit('barcode-received', { barcode });
+    const { sessionId, userId, barcode } = data;
+    console.log(`📡 Código de barras ${barcode} enviado. Sesión: ${sessionId}, Usuario: ${userId}`);
+    
+    // Reenviar a la sesión específica (Retrocompatibilidad)
+    if (sessionId) {
+      socket.to(`pos-${sessionId}`).emit('barcode-received', { barcode });
+    }
+    
+    // Reenviar a la sala del usuario (Nueva conexión automática)
+    if (userId) {
+      socket.to(`user-${userId}`).emit('barcode-received', { barcode });
+    }
   });
 
   socket.on('disconnect', () => {
