@@ -46,7 +46,9 @@ app.use(cors({
     const allowedOrigins = [
       'http://localhost:5173',
       'http://localhost:3000',
-      process.env.FRONTEND_URL
+      process.env.FRONTEND_URL,
+      // Render y Netlify a veces envían el origin con/sin slash al final
+      process.env.FRONTEND_URL?.replace(/\/$/, '')
     ].filter(Boolean);
 
     if (!origin) return callback(null, true);
@@ -191,9 +193,39 @@ app.set('io', io);
 // MANEJO DE ERRORES GLOBAL
 // ============================================
 app.use((err, req, res, next) => {
-  console.error('💥 Error:', err.message);
-  res.status(500).json({
-    error: 'Error interno del servidor'
+  console.error('💥 Error detectado:', err);
+
+  // Error de validación de Mongoose
+  if (err.name === 'ValidationError') {
+    const messages = Object.values(err.errors).map(val => val.message);
+    return res.status(400).json({ error: 'Error de validación', details: messages });
+  }
+
+  // Error de ID inválido de MongoDB (CastError)
+  if (err.name === 'CastError') {
+    return res.status(404).json({ error: `Recurso no encontrado: ID inválido (${err.value})` });
+  }
+
+  // Error de duplicado en MongoDB (MongoError / MongoServerError)
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue)[0];
+    return res.status(400).json({ error: `Ya existe un registro con ese valor en el campo: ${field}` });
+  }
+
+  // Error de JWT
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({ error: 'Token inválido. Por favor, inicia sesión de nuevo.' });
+  }
+
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({ error: 'Tu sesión ha expirado. Inicia sesión nuevamente.' });
+  }
+
+  // Error por defecto
+  const statusCode = err.statusCode || 500;
+  res.status(statusCode).json({
+    error: err.message || 'Error interno del servidor',
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
 

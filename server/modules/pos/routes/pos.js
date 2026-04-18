@@ -92,7 +92,10 @@ router.get("/products/search", auth, async (req, res) => {
     const query = { isActive: true };
 
     if (q) {
-      query.name = { $regex: q, $options: "i" };
+      query.$or = [
+        { $text: { $search: q } },
+        { name: { $regex: q, $options: "i" } }
+      ];
     }
 
     const products = await Product.find(query)
@@ -271,6 +274,16 @@ router.post("/sale", auth, async (req, res) => {
     
     for (const admin of admins) {
       sendNotification(admin._id.toString(), notification);
+      
+      // ENVIAR PUSH REAL (Segundo plano)
+      sendPushNotification(admin._id.toString(), {
+        title: notification.title,
+        body: notification.body,
+        icon: '/logo1.png',
+        data: {
+          url: '/inventario'
+        }
+      });
     }
 
     res.json({

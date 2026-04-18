@@ -3,13 +3,15 @@ const express = require('express');
 const Category = require('../models/Category');
 const auth = require('../../login/middleware/auth');
 const { validateCategory } = require('../../../shared/middleware/validation');
+const { requirePermission } = require('../../../shared/middleware/permissions');
+const { logAudit } = require('../../core/utils/logger');
 
 const router = express.Router();
 
 // ============================================
 // OBTENER TODAS LAS CATEGORÍAS
 // ============================================
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, requirePermission('viewCategories'), async (req, res) => {
   try {
     const categories = await Category.find({ isActive: true }).sort({ order: 1 });
     res.json(categories);
@@ -19,14 +21,10 @@ router.get('/', auth, async (req, res) => {
 });
 
 // ============================================
-// CREAR CATEGORÍA (solo admin)
+// CREAR CATEGORÍA
 // ============================================
-router.post('/', auth, validateCategory, async (req, res) => {
+router.post('/', auth, requirePermission('createCategories'), validateCategory, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    
     const { name, description, image, parentId, order } = req.body;
     
     const category = new Category({
@@ -39,6 +37,16 @@ router.post('/', auth, validateCategory, async (req, res) => {
     });
     
     await category.save();
+
+    await logAudit(req, {
+      action: 'CREATE',
+      module: 'INVENTORY',
+      entityId: category._id,
+      entityName: category.name,
+      description: `Creó la categoría: ${category.name}`,
+      newValue: category
+    });
+
     res.status(201).json(category);
   } catch (error) {
     console.error('Error al crear categoría:', error);
@@ -50,24 +58,31 @@ router.post('/', auth, validateCategory, async (req, res) => {
 });
 
 // ============================================
-// ACTUALIZAR CATEGORÍA (solo admin)
+// ACTUALIZAR CATEGORÍA
 // ============================================
-router.put('/:id', auth, validateCategory, async (req, res) => {
+router.put('/:id', auth, requirePermission('editCategories'), validateCategory, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado' });
+    const oldCategory = await Category.findById(req.params.id);
+    if (!oldCategory) {
+      return res.status(404).json({ error: 'Categoría no encontrada' });
     }
-    
+
     const category = await Category.findByIdAndUpdate(
       req.params.id,
       { ...req.body, updatedAt: Date.now() },
       { new: true }
     );
     
-    if (!category) {
-      return res.status(404).json({ error: 'Categoría no encontrada' });
-    }
-    
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: category._id,
+      entityName: category.name,
+      description: `Actualizó la categoría: ${category.name}`,
+      oldValue: oldCategory,
+      newValue: category
+    });
+
     res.json(category);
   } catch (error) {
     res.status(500).json({ error: 'Error al actualizar categoría' });
@@ -75,19 +90,24 @@ router.put('/:id', auth, validateCategory, async (req, res) => {
 });
 
 // ============================================
-// ELIMINAR CATEGORÍA (solo admin)
+// ELIMINAR CATEGORÍA
 // ============================================
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth, requirePermission('deleteCategories'), async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    
     const category = await Category.findByIdAndDelete(req.params.id);
     if (!category) {
       return res.status(404).json({ error: 'Categoría no encontrada' });
     }
     
+    await logAudit(req, {
+      action: 'DELETE',
+      module: 'INVENTORY',
+      entityId: category._id,
+      entityName: category.name,
+      description: `Eliminó la categoría: ${category.name}`,
+      oldValue: category
+    });
+
     res.json({ message: 'Categoría eliminada' });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar categoría' });

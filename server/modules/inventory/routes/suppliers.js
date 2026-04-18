@@ -2,11 +2,15 @@
 const express = require('express');
 const Supplier = require('../models/Supplier');
 const auth = require('../../login/middleware/auth');
+const { requirePermission } = require('../../../shared/middleware/permissions');
+const { logAudit } = require('../../core/utils/logger');
 
 const router = express.Router();
 
-// Obtener todos los proveedores
-router.get('/', auth, async (req, res) => {
+// ============================================
+// OBTENER TODOS LOS PROVEEDORES
+// ============================================
+router.get('/', auth, requirePermission('viewSuppliers'), async (req, res) => {
   try {
     const suppliers = await Supplier.find({ isActive: true }).sort({ name: 1 });
     res.json(suppliers);
@@ -15,11 +19,23 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Crear proveedor
-router.post('/', auth, async (req, res) => {
+// ============================================
+// CREAR PROVEEDOR
+// ============================================
+router.post('/', auth, requirePermission('createSuppliers'), async (req, res) => {
   try {
     const supplier = new Supplier(req.body);
     await supplier.save();
+
+    await logAudit(req, {
+      action: 'CREATE',
+      module: 'INVENTORY',
+      entityId: supplier._id,
+      entityName: supplier.name,
+      description: `Creó el proveedor: ${supplier.name}`,
+      newValue: supplier
+    });
+
     res.status(201).json(supplier);
   } catch (error) {
     if (error.code === 11000) {
@@ -29,20 +45,53 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Actualizar proveedor
-router.put('/:id', auth, async (req, res) => {
+// ============================================
+// ACTUALIZAR PROVEEDOR
+// ============================================
+router.put('/:id', auth, requirePermission('editSuppliers'), async (req, res) => {
   try {
+    const oldSupplier = await Supplier.findById(req.params.id);
+    if (!oldSupplier) {
+      return res.status(404).json({ error: 'Proveedor no encontrado' });
+    }
+
     const supplier = await Supplier.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: supplier._id,
+      entityName: supplier.name,
+      description: `Actualizó el proveedor: ${supplier.name}`,
+      oldValue: oldSupplier,
+      newValue: supplier
+    });
+
     res.json(supplier);
   } catch (error) {
     res.status(500).json({ error: 'Error al actualizar proveedor' });
   }
 });
 
-// Eliminar proveedor (desactivar)
-router.delete('/:id', auth, async (req, res) => {
+// ============================================
+// ELIMINAR PROVEEDOR (desactivar)
+// ============================================
+router.delete('/:id', auth, requirePermission('deleteSuppliers'), async (req, res) => {
   try {
-    await Supplier.findByIdAndUpdate(req.params.id, { isActive: false });
+    const supplier = await Supplier.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    if (!supplier) {
+      return res.status(404).json({ error: 'Proveedor no encontrado' });
+    }
+
+    await logAudit(req, {
+      action: 'DELETE',
+      module: 'INVENTORY',
+      entityId: supplier._id,
+      entityName: supplier.name,
+      description: `Eliminó el proveedor: ${supplier.name}`,
+      oldValue: supplier
+    });
+
     res.json({ message: 'Proveedor eliminado' });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar proveedor' });

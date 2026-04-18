@@ -1,8 +1,21 @@
 // client/src/shared/services/socketService.js
 import { io } from 'socket.io-client';
+import api from './api';
 
 let socket = null;
 let pendingUserId = null;
+const VAPID_PUBLIC_KEY = 'BIqCZYmZJqq53fJCwLPgvKSDbRaQiGQnrSeX3MoWS5gxIh1tuKUO3haEu2LGCAbmE2TqSg7iQ7zkTGgcySc2tvI';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
 
 export const initSocket = (userId) => {
   if (!socket) {
@@ -11,13 +24,14 @@ export const initSocket = (userId) => {
     
     socket.on('connect', () => {
       console.log('✅ Socket conectado, ID:', socket.id);
-      // Enviar userId pendiente o el actual
       const userIdToSend = pendingUserId || userId;
       if (userIdToSend) {
         socket.emit('register-user', userIdToSend);
-        console.log('📝 Registrando usuario:', userIdToSend);
         pendingUserId = null;
       }
+      
+      // Intentar suscripción Push en segundo plano
+      subscribeToPushNotifications();
     });
     
     socket.on('connect_error', (error) => {
@@ -28,15 +42,40 @@ export const initSocket = (userId) => {
       console.log('🔌 Socket desconectado');
     });
   } else if (userId && socket.connected) {
-    // Si ya está conectado, enviar registro ahora
     socket.emit('register-user', userId);
-    console.log('📝 Registrando usuario (reconexión):', userId);
   } else if (userId) {
-    // Guardar para cuando se conecte
     pendingUserId = userId;
   }
   
   return socket;
+};
+
+// Función para suscribirse a notificaciones push reales (segundo plano)
+export const subscribeToPushNotifications = async () => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.warn('⚠️ Notificaciones push no soportadas');
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+      console.log('✅ Nueva suscripción push creada');
+    }
+
+    // Enviar suscripción al servidor
+    await api.post('/auth/push-subscribe', { subscription });
+    console.log('📡 Push sincronizado');
+
+  } catch (error) {
+    console.log('ℹ️ Suscripción push pendiente de permisos');
+  }
 };
 
 export const getSocket = () => socket;
@@ -49,19 +88,15 @@ export const disconnectSocket = () => {
 };
 
 export const requestNotificationPermission = async () => {
-  if (!('Notification' in window)) {
-    console.log('⚠️ Este navegador no soporta notificaciones');
-    return false;
-  }
+  if (!('Notification' in window)) return false;
   
-  if (Notification.permission === 'granted') {
-    console.log('✅ Permiso concedido');
-    return true;
-  }
+  if (Notification.permission === 'granted') return true;
   
   if (Notification.permission !== 'denied') {
     const permission = await Notification.requestPermission();
-    console.log('📢 Permiso:', permission);
+    if (permission === 'granted') {
+      subscribeToPushNotifications();
+    }
     return permission === 'granted';
   }
   

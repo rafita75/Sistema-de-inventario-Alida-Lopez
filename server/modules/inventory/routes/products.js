@@ -18,10 +18,11 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
     const query = {};
     
     if (search) {
+      // Intentar búsqueda de texto completa primero
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { sku: { $regex: search, $options: 'i' } },
-        { barcode: { $regex: search, $options: 'i' } }
+        { $text: { $search: search } },
+        { barcode: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } }
       ];
     }
     
@@ -53,12 +54,8 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
   }
 });
 
-router.post('/', auth, validateProduct, async (req, res) => {
+router.post('/', auth, requirePermission('createProducts'), validateProduct, async (req, res) => {
   try {
-    if (!canCreateProducts(req)) {
-      return res.status(403).json({ error: 'No tienes permiso para crear productos' });
-    }
-    
     const productData = req.body;
     
     if (productData.sku === '' || !productData.sku) {
@@ -155,12 +152,8 @@ router.put('/:id', auth, requirePermission('editProducts'), validateProduct, asy
   }
 });
 
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth, requirePermission('deleteProducts'), async (req, res) => {
   try {
-    if (!canDeleteProducts(req)) {
-      return res.status(403).json({ error: 'No tienes permiso para eliminar productos' });
-    }
-    
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) {
       return res.status(404).json({ error: 'Producto no encontrado' });
@@ -201,4 +194,3 @@ router.get('/barcode/:code', auth, async (req, res) => {
 });
 
 module.exports = router;
-

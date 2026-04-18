@@ -87,28 +87,19 @@ router.post('/login',
       return res.status(401).json({ error: 'Usuario desactivado. Contacta al administrador.' });
     }
     
-    // 👈 Asegurar que los permisos se envíen correctamente
+    // 👈 Payload ligero para el token
     const token = jwt.sign(
       { 
         id: user._id, 
         name: user.name, 
         email: user.email, 
-        role: user.role,
-        viewProducts: user.viewProducts || false,
-        createProducts: user.createProducts || false,
-        editProducts: user.editProducts || false,
-        deleteProducts: user.deleteProducts || false,
-        viewInventory: user.viewInventory || false,
-        adjustStock: user.adjustStock || false,
-        usePOS: user.usePOS || false,
-        viewAccounting: user.viewAccounting || false,
-        viewCustomers: user.viewCustomers || false
+        role: user.role
       },
       process.env.JWT_SECRET,
       { expiresIn: '30d' }
     );
     
-    // 👈 Devolver el usuario con todos sus permisos
+    // 👈 Devolver el usuario con todos sus permisos (para el estado de React)
     res.json({
       token,
       user: {
@@ -117,7 +108,7 @@ router.post('/login',
         email: user.email,
         role: user.role,
         isActive: user.isActive,
-        // Permisos
+        // Permisos consolidados para el frontend
         viewProducts: user.viewProducts || false,
         createProducts: user.createProducts || false,
         editProducts: user.editProducts || false,
@@ -275,6 +266,31 @@ router.get('/me', auth, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al obtener perfil' });
+  }
+});
+
+// ============================================
+// REGISTRAR SUSCRIPCIÓN PUSH (Notificaciones segundo plano)
+// ============================================
+router.post('/push-subscribe', auth, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    const user = await User.findById(req.user.id);
+
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // Verificar si la suscripción ya existe (para no duplicar)
+    const exists = user.pushSubscriptions.some(sub => sub.endpoint === subscription.endpoint);
+
+    if (!exists) {
+      user.pushSubscriptions.push(subscription);
+      await user.save();
+    }
+
+    res.status(200).json({ success: true, message: 'Suscripción registrada' });
+  } catch (error) {
+    console.error('Error al suscribir push:', error);
+    res.status(500).json({ error: 'Error al registrar suscripción push' });
   }
 });
 

@@ -2,11 +2,15 @@
 const express = require('express');
 const Brand = require('../models/Brand');
 const auth = require('../../login/middleware/auth');
+const { requirePermission } = require('../../../shared/middleware/permissions');
+const { logAudit } = require('../../core/utils/logger');
 
 const router = express.Router();
 
-// Obtener todas las marcas
-router.get('/', auth, async (req, res) => {
+// ============================================
+// OBTENER TODAS LAS MARCAS
+// ============================================
+router.get('/', auth, requirePermission('viewBrands'), async (req, res) => {
   try {
     const brands = await Brand.find({ isActive: true }).sort({ name: 1 });
     res.json(brands);
@@ -15,11 +19,23 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-// Crear marca
-router.post('/', auth, async (req, res) => {
+// ============================================
+// CREAR MARCA
+// ============================================
+router.post('/', auth, requirePermission('createBrands'), async (req, res) => {
   try {
     const brand = new Brand(req.body);
     await brand.save();
+
+    await logAudit(req, {
+      action: 'CREATE',
+      module: 'INVENTORY',
+      entityId: brand._id,
+      entityName: brand.name,
+      description: `Creó la marca: ${brand.name}`,
+      newValue: brand
+    });
+
     res.status(201).json(brand);
   } catch (error) {
     if (error.code === 11000) {
@@ -29,20 +45,53 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Actualizar marca
-router.put('/:id', auth, async (req, res) => {
+// ============================================
+// ACTUALIZAR MARCA
+// ============================================
+router.put('/:id', auth, requirePermission('editBrands'), async (req, res) => {
   try {
+    const oldBrand = await Brand.findById(req.params.id);
+    if (!oldBrand) {
+      return res.status(404).json({ error: 'Marca no encontrada' });
+    }
+
     const brand = await Brand.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: brand._id,
+      entityName: brand.name,
+      description: `Actualizó la marca: ${brand.name}`,
+      oldValue: oldBrand,
+      newValue: brand
+    });
+
     res.json(brand);
   } catch (error) {
     res.status(500).json({ error: 'Error al actualizar marca' });
   }
 });
 
-// Eliminar marca (desactivar)
-router.delete('/:id', auth, async (req, res) => {
+// ============================================
+// ELIMINAR MARCA (desactivar)
+// ============================================
+router.delete('/:id', auth, requirePermission('deleteBrands'), async (req, res) => {
   try {
-    await Brand.findByIdAndUpdate(req.params.id, { isActive: false });
+    const brand = await Brand.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    if (!brand) {
+      return res.status(404).json({ error: 'Marca no encontrada' });
+    }
+
+    await logAudit(req, {
+      action: 'DELETE',
+      module: 'INVENTORY',
+      entityId: brand._id,
+      entityName: brand.name,
+      description: `Eliminó la marca: ${brand.name}`,
+      oldValue: brand
+    });
+
     res.json({ message: 'Marca eliminada' });
   } catch (error) {
     res.status(500).json({ error: 'Error al eliminar marca' });

@@ -33,8 +33,19 @@ const UserSchema = new mongoose.Schema({
   editProducts: { type: Boolean, default: false },
   deleteProducts: { type: Boolean, default: false },
   viewCategories: { type: Boolean, default: false },
+  createCategories: { type: Boolean, default: false },
+  editCategories: { type: Boolean, default: false },
+  deleteCategories: { type: Boolean, default: false },
+  
   viewBrands: { type: Boolean, default: false },
+  createBrands: { type: Boolean, default: false },
+  editBrands: { type: Boolean, default: false },
+  deleteBrands: { type: Boolean, default: false },
+  
   viewSuppliers: { type: Boolean, default: false },
+  createSuppliers: { type: Boolean, default: false },
+  editSuppliers: { type: Boolean, default: false },
+  deleteSuppliers: { type: Boolean, default: false },
   
   // Inventario y Etiquetas
   viewInventory: { type: Boolean, default: false },
@@ -54,6 +65,18 @@ const UserSchema = new mongoose.Schema({
   
   // Perfil propio
   editOwnProfile: { type: Boolean, default: true },
+  
+  // Suscripciones a Notificaciones Push
+  pushSubscriptions: [
+    {
+      endpoint: String,
+      expirationTime: Number,
+      keys: {
+        p256dh: String,
+        auth: String
+      }
+    }
+  ],
   
   // Empleados (solo admin)
   manageEmployees: { type: Boolean, default: false },

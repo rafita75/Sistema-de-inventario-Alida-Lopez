@@ -1,5 +1,5 @@
-// client/src/pages/Admin/AccountingDashboard.jsx
-import { useState, useEffect } from 'react';
+// client/src/modules/accounting/pages/AccountingDashboard.jsx
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, ComposedChart
 } from 'recharts';
@@ -41,7 +41,7 @@ export default function AccountingDashboard() {
     }
   };
 
-  const payCustomerDebt = async (debtId) => {
+  const payCustomerDebt = useCallback(async (debtId) => {
     if (!confirm('¿Marcar esta deuda como pagada? Se registrará el ingreso en caja.')) return;
     
     try {
@@ -56,9 +56,9 @@ export default function AccountingDashboard() {
       setMessage('❌ Error al pagar deuda');
       setTimeout(() => setMessage(''), 3000);
     }
-  };
+  }, []);
 
-  const payBusinessDebt = async (debtId) => {
+  const payBusinessDebt = useCallback(async (debtId) => {
     if (!confirm('¿Marcar esta deuda como pagada? Se registrará el gasto.')) return;
     
     try {
@@ -71,13 +71,15 @@ export default function AccountingDashboard() {
       setMessage('❌ Error al pagar deuda');
       setTimeout(() => setMessage(''), 3000);
     }
-  };
+  }, []);
 
-  const formatMonth = (monthStr) => {
+  const formatMonth = useCallback((monthStr) => {
     const [year, month] = monthStr.split('-');
     const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
     return `${months[parseInt(month) - 1]} ${year}`;
-  };
+  }, []);
+
+  const chartData = useMemo(() => balanceGeneral, [balanceGeneral]);
 
   if (loading) {
     return (
@@ -216,7 +218,7 @@ export default function AccountingDashboard() {
         
         <div className="h-80 w-full mb-8">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={balanceGeneral}>
+            <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
               <XAxis 
                 dataKey="mes" 

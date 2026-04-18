@@ -101,9 +101,18 @@ ProductSchema.pre('save', async function() {
   this.updatedAt = Date.now();
 });
 
-// ELIMINAR los índices únicos existentes en la base de datos
-// Ejecuta esto en MongoDB Compass o en la consola de MongoDB:
-// db.products.dropIndex("sku_1")
-// db.products.dropIndex("slug_1")
+// ÍNDICE DE TEXTO PARA BÚSQUEDAS RÁPIDAS
+ProductSchema.index({ 
+  name: 'text', 
+  sku: 'text', 
+  barcode: 'text' 
+}, {
+  weights: {
+    name: 10,
+    sku: 5,
+    barcode: 5
+  },
+  name: "ProductTextIndex"
+});
 
 module.exports = mongoose.model('Product', ProductSchema);
