@@ -3,9 +3,11 @@ import { useState, useEffect, useRef } from 'react';
 import { searchProducts, getProductByBarcode, getProductVariants, registerSale } from '../services/posService';
 import Button from '../../core/components/UI/Button';
 import { QRCodeSVG } from 'qrcode.react';
-import { initSocket } from '../../../shared/services/socketService';
+import { initSocket, getSocket } from '../../../shared/services/socketService';
+import { useAuth } from '../../login/contexts/AuthContext';
 
 export default function POS({ onClose, onSaleComplete }) {
+  const { user } = useAuth();
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState([]);
@@ -25,50 +27,39 @@ export default function POS({ onClose, onSaleComplete }) {
   // ESTADOS DEL ESCÁNER MÓVIL
   // ==========================================
   const [showScannerQR, setShowScannerQR] = useState(false);
-  const [sessionId, setSessionId] = useState('');
   const [scannerConnected, setScannerConnected] = useState(false);
   
   const barcodeRef = useRef(null);
   const barcodeTimeoutRef = useRef(null);
-  const socketRef = useRef(null);
 
-  // Inicializar sesión de escáner al abrir el POS
+  // Inicializar conexión automática al abrir el POS
   useEffect(() => {
-    // Generar un ID de sesión único
-    const newSessionId = Math.random().toString(36).substring(2, 10);
-    setSessionId(newSessionId);
+    if (!user?.id) return;
 
-    // Conectar al socket
-    const socket = initSocket(newSessionId);
-    socketRef.current = socket;
+    // Conectar al socket usando el User ID (Sincronización automática)
+    const socket = initSocket(user.id);
 
-    if (socket) {
-      socket.on('connect', () => {
-        socket.emit('join-pos-session', newSessionId);
-      });
-
-      socket.on('scanner-connected', () => {
+    const handleBarcode = (data) => {
+      if (data.barcode) {
+        console.log('📡 Código recibido del móvil:', data.barcode);
+        submitBarcode(data.barcode);
         setScannerConnected(true);
-        setShowScannerQR(false); // Ocultar QR automáticamente
-        setMessage('📱 Celular conectado correctamente');
-        setTimeout(() => setMessage(''), 3000);
-      });
+        setMessage('📷 Código escaneado desde el celular');
+        setTimeout(() => setMessage(''), 2000);
+      }
+    };
 
-      socket.on('barcode-received', (data) => {
-        if (data.barcode) {
-          submitBarcode(data.barcode);
-        }
-      });
-    }
+    socket.on('barcode-received', handleBarcode);
+    socket.on('scanner-connected', () => setScannerConnected(true));
 
     if (barcodeRef.current) {
       barcodeRef.current.focus();
     }
 
     return () => {
-      if (socket) socket.disconnect();
+      socket.off('barcode-received', handleBarcode);
     };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const searchProductsDebounced = setTimeout(async () => {
