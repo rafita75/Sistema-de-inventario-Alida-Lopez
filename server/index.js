@@ -49,7 +49,6 @@ const corsOptions = {
 
 // APLICAR CORS INMEDIATAMENTE (Antes que cualquier otro middleware)
 app.use(cors(corsOptions));
-app.options('(.*)', cors(corsOptions)); // Manejar pre-flight de todas las rutas (Sintaxis Express 5)
 
 // ============================================
 // CONFIGURACIÓN DE SOCKET.IO
