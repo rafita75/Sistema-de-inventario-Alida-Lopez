@@ -256,8 +256,8 @@ export default function POS({ onClose, onSaleComplete }) {
     }
   };
 
-  // URL para el escáner móvil (detecta automáticamente la IP o el dominio)
-  const mobileScannerUrl = `${window.location.origin}/scanner/${sessionId}`;
+  // URL para el escáner móvil (Conexión automática por usuario)
+  const mobileScannerUrl = `${window.location.origin}/scanner`;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
