@@ -85,12 +85,14 @@ export const requestNotificationPermission = async () => {
 };
 
 export const showNotification = (title, options) => {
-  // Notificación nativa del navegador (si la pestaña está abierta)
-  if (Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+  // Notificación nativa del navegador
+  if (Notification.permission === 'granted') {
     const notification = new Notification(title, options);
     notification.onclick = () => {
       window.focus();
       notification.close();
     };
+    // Auto-cerrar en 5 segundos
+    setTimeout(() => notification.close(), 5000);
   }
 };

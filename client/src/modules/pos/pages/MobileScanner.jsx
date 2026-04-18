@@ -15,7 +15,13 @@ export default function MobileScanner() {
   useEffect(() => {
     if (user?.id) {
       console.log('🔗 Conectando escáner para usuario:', user.id);
-      initSocket(user.id);
+      const socket = initSocket(user.id);
+      
+      // Forzar unión a sala si ya estaba conectado
+      if (socket && socket.connected) {
+        socket.emit('register-user', user.id);
+      }
+      
       setStatus('Listo para conectar ✅');
     }
   }, [user]);
