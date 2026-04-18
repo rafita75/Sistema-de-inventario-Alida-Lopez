@@ -41,26 +41,30 @@ const io = socketIo(server, {
 // ============================================
 app.use(helmet());
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.FRONTEND_URL?.replace(/\/$/, ''),
+  'https://libreria-ac.netlify.app' // URL explícita para asegurar
+].filter(Boolean);
+
 app.use(cors({
   origin: function (origin, callback) {
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      process.env.FRONTEND_URL,
-      // Render y Netlify a veces envían el origin con/sin slash al final
-      process.env.FRONTEND_URL?.replace(/\/$/, '')
-    ].filter(Boolean);
-
+    // Permitir peticiones sin origen (como apps móviles o curl)
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    
+    if (allowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
     } else {
-      console.warn('❌ CORS bloqueado para:', origin);
-      callback(new Error('No permitido por CORS'));
+      console.warn(`❌ CORS bloqueado para: ${origin}. Permitidos:`, allowedOrigins);
+      callback(null, false); // No permitir, pero no lanzar error para que cors maneje la cabecera
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
 app.use(express.json());
