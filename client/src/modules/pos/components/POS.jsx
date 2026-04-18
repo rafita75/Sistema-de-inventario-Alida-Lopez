@@ -5,6 +5,7 @@ import Button from '../../core/components/UI/Button';
 import { QRCodeSVG } from 'qrcode.react';
 import { initSocket, getSocket } from '../../../shared/services/socketService';
 import { useAuth } from '../../login/contexts/AuthContext';
+import { Html5Qrcode } from 'html5-qrcode';
 
 export default function POS({ onClose, onSaleComplete }) {
   const { user } = useAuth();
@@ -37,7 +38,50 @@ export default function POS({ onClose, onSaleComplete }) {
   // Detectar si es móvil para mostrar el botón de escáner nativo
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-  // ... (useEffect de conexión automática y otros métodos existentes)
+  // Inicializar conexión automática al abrir el POS
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const socket = initSocket(user.id);
+
+    const handleBarcode = (data) => {
+      if (data.barcode) {
+        console.log('📡 Código recibido del móvil:', data.barcode);
+        submitBarcode(data.barcode);
+        setScannerConnected(true);
+        setMessage('📷 Código escaneado desde el celular');
+        setTimeout(() => setMessage(''), 2000);
+      }
+    };
+
+    socket.on('barcode-received', handleBarcode);
+    socket.on('scanner-connected', () => setScannerConnected(true));
+
+    if (barcodeRef.current) {
+      barcodeRef.current.focus();
+    }
+
+    return () => {
+      socket.off('barcode-received', handleBarcode);
+    };
+  }, [user]);
+
+  useEffect(() => {
+    const searchProductsDebounced = setTimeout(async () => {
+      if (searchTerm.length >= 2) {
+        try {
+          const data = await searchProducts(searchTerm);
+          setProducts(data);
+        } catch (error) {
+          console.error('Error buscando productos:', error);
+        }
+      } else {
+        setProducts([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(searchProductsDebounced);
+  }, [searchTerm]);
 
   const startNativeScanner = async () => {
     setShowNativeScanner(true);
@@ -47,17 +91,15 @@ export default function POS({ onClose, onSaleComplete }) {
         nativeScannerRef.current = html5QrCode;
         await html5QrCode.start(
           { facingMode: "environment" },
-          { fps: 15, qrbox: { width: 250, height: 150 } },
+          { fps: 15, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 },
           (decodedText) => {
             submitBarcode(decodedText);
             if (navigator.vibrate) navigator.vibrate(100);
-            // Opcional: Cerrar tras un escaneo o mantener abierto
-            // setShowNativeScanner(false);
-            // html5QrCode.stop();
           }
         );
       } catch (err) {
-        alert("Error al iniciar cámara: " + err.message);
+        console.error("Error cámara:", err);
+        alert("No se pudo iniciar la cámara");
         setShowNativeScanner(false);
       }
     }, 300);
@@ -65,14 +107,64 @@ export default function POS({ onClose, onSaleComplete }) {
 
   const stopNativeScanner = async () => {
     if (nativeScannerRef.current) {
-      await nativeScannerRef.current.stop();
+      try {
+        await nativeScannerRef.current.stop();
+      } catch (err) {
+        console.error(err);
+      }
       nativeScannerRef.current = null;
     }
     setShowNativeScanner(false);
   };
 
+  const submitBarcode = async (code) => {
+    if (!code.trim()) return;
+
+    try {
+      const product = await getProductByBarcode(code);
+      
+      if (product.isVariant) {
+        addToCart({
+          productId: product.parentProductId,
+          name: product.name,
+          price: product.price,
+          stock: product.stock,
+          variantId: product.variantId,
+          variantName: product.name.split(' - ')[1] || product.name,
+          sku: product.sku
+        });
+      } 
+      else if (product.hasVariants && product.variants && product.variants.length > 0) {
+        setSelectedProduct(product);
+        setVariants(product.variants);
+        setShowVariantModal(true);
+      } 
+      else {
+        addToCart({
+          productId: product._id,
+          name: product.name,
+          price: product.price,
+          stock: product.stock,
+          variantId: null,
+          variantName: null
+        });
+      }
+      
+      setBarcodeInput('');
+      if (barcodeRef.current) barcodeRef.current.focus();
+    } catch (error) {
+      console.error(error);
+      setBarcodeInput('');
+    }
+  };
+
   const handleBarcodeChange = (e) => {
-    // ... (lógica existente)
+    const value = e.target.value;
+    setBarcodeInput(value);
+    if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
+    if (value.trim()) {
+      barcodeTimeoutRef.current = setTimeout(() => submitBarcode(value), 300);
+    }
   };
 
   const handleBarcodeSubmit = (e) => {
@@ -127,7 +219,6 @@ export default function POS({ onClose, onSaleComplete }) {
     setCart(prev => {
       const itemKey = item.variantId ? `${item.productId}-${item.variantId}` : item.productId;
       const existing = prev.find(i => i.itemKey === itemKey);
-      
       if (existing) {
         if (existing.quantity + 1 > item.stock) {
           alert(`⚠️ Solo puedes agregar hasta ${item.stock} unidades.`);
@@ -145,7 +236,7 @@ export default function POS({ onClose, onSaleComplete }) {
 
   const updateQuantity = (itemKey, quantity) => {
     const item = cart.find(i => i.itemKey === itemKey);
-    if (quantity > item.stock) {
+    if (quantity > (item?.stock || 0)) {
       alert(`⚠️ Solo hay ${item.stock} unidades disponibles.`);
       return;
     }
@@ -194,7 +285,6 @@ export default function POS({ onClose, onSaleComplete }) {
     }
   };
 
-  // URL para el escáner móvil (Conexión automática por usuario)
   const mobileScannerUrl = `${window.location.origin}/scanner`;
 
   return (
@@ -217,13 +307,12 @@ export default function POS({ onClose, onSaleComplete }) {
             >
               {scannerConnected ? '📱 Celular Vinculado' : '📷 Vincular Celular'}
             </button>
-
             {isMobile && (
               <button 
                 onClick={startNativeScanner}
                 className="text-sm px-3 py-1.5 rounded-lg font-bold bg-green-600 text-white shadow-lg animate-pulse"
               >
-                📷 ESCANEAR AHORA
+                📷 ESCANEAR
               </button>
             )}
           </div>
@@ -278,9 +367,6 @@ export default function POS({ onClose, onSaleComplete }) {
                   <div className="text-xs text-gray-400 mt-1">Stock: {product.stock}</div>
                 </div>
               ))}
-              {products.length === 0 && searchTerm.length >= 2 && (
-                <p className="text-gray-400 col-span-full text-center py-8">No se encontraron productos</p>
-              )}
             </div>
           </div>
 
@@ -322,74 +408,43 @@ export default function POS({ onClose, onSaleComplete }) {
               )}
             </div>
 
-            <div className="shrink-0 mt-4">
-              <div className="border-t border-gray-200 pt-4 mb-4">
-                <div className="flex justify-between text-lg font-bold">
-                  <span className="text-gray-600">Total</span>
-                  <span className="text-green-600">Q{subtotal.toLocaleString()}</span>
-                </div>
+            <div className="shrink-0 mt-4 border-t border-gray-200 pt-4">
+              <div className="flex justify-between text-lg font-bold mb-4">
+                <span className="text-gray-600">Total</span>
+                <span className="text-green-600">Q{subtotal.toLocaleString()}</span>
               </div>
-
-              <div className="space-y-3 mb-4">
-                <input
-                  type="text"
-                  placeholder="Nombre del cliente (requerido para crédito)"
-                  value={clienteNombre}
-                  onChange={(e) => setClienteNombre(e.target.value)}
-                  className={`w-full p-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 ${isDebt ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200'}`}
-                />
+              <input
+                type="text"
+                placeholder="Nombre del cliente"
+                value={clienteNombre}
+                onChange={(e) => setClienteNombre(e.target.value)}
+                className={`w-full p-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500 mb-4 ${isDebt ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200'}`}
+              />
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <button onClick={() => setIsDebt(false)} className={`py-2.5 rounded-xl text-sm font-medium transition-all ${!isDebt ? 'bg-green-600 text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}>💵 Efectivo</button>
+                <button onClick={() => setIsDebt(true)} className={`py-2.5 rounded-xl text-sm font-medium transition-all ${isDebt ? 'bg-yellow-600 text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}>📝 Crédito</button>
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Tipo de venta</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setIsDebt(false)} className={`py-2.5 rounded-xl text-sm font-medium transition-all ${!isDebt ? 'bg-gradient-to-r from-green-600 to-green-700 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>💵 Efectivo</button>
-                  <button onClick={() => setIsDebt(true)} className={`py-2.5 rounded-xl text-sm font-medium transition-all ${isDebt ? 'bg-gradient-to-r from-yellow-600 to-yellow-700 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>📝 Crédito</button>
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-4">
-                <Button variant="success" onClick={handleCheckout} loading={loading} disabled={cart.length === 0} className="flex-1 bg-gradient-to-r from-green-600 to-green-700">
+              <div className="flex gap-3">
+                <Button variant="success" onClick={handleCheckout} loading={loading} disabled={cart.length === 0} className="flex-1 bg-green-600">
                   {isDebt ? '📝 Crédito' : '💰 Cobrar'}
                 </Button>
-                <Button variant="danger" onClick={() => setCart([])} disabled={cart.length === 0} className="bg-red-500 hover:bg-red-600 px-4">
-                  🗑️
-                </Button>
+                <Button variant="danger" onClick={() => setCart([])} disabled={cart.length === 0} className="bg-red-500 px-4">🗑️</Button>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODAL QR ESCÁNER */}
+      {/* MODAL QR */}
       {showScannerQR && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center shadow-2xl relative">
-            <button onClick={() => setShowScannerQR(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-800">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-            
-            <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
-              📱
-            </div>
-            
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-8 text-center relative">
+            <button onClick={() => setShowScannerQR(false)} className="absolute top-4 right-4 text-gray-400">✕</button>
             <h3 className="text-2xl font-bold text-gray-800 mb-2">Vincular Celular</h3>
-            <p className="text-gray-500 mb-6 text-sm">
-              Escanea este código QR con la cámara de tu celular para usarlo como lector de código de barras.
-            </p>
-            
-            <div className="bg-gray-50 p-4 rounded-2xl flex justify-center border border-gray-100 mb-6">
+            <div className="bg-gray-50 p-4 rounded-2xl flex justify-center border border-gray-100 my-6">
               <QRCodeSVG value={mobileScannerUrl} size={200} level="H" includeMargin={true} />
             </div>
-
-            <div className="text-xs text-gray-400 mb-4 bg-gray-100 p-2 rounded-lg break-all">
-              {mobileScannerUrl}
-            </div>
-
-            <p className="text-sm font-medium text-blue-600 animate-pulse flex items-center justify-center gap-2">
-              <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
-              Esperando conexión...
-            </p>
+            <p className="text-sm text-gray-500">Escanea con tu cámara para usar el celular como lector remoto.</p>
           </div>
         </div>
       )}
@@ -397,51 +452,38 @@ export default function POS({ onClose, onSaleComplete }) {
       {/* MODAL VARIANTES */}
       {showVariantModal && selectedProduct && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto shadow-xl animate-scale-in">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] overflow-auto shadow-xl">
             <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex justify-between items-center">
               <h3 className="text-lg font-semibold text-gray-800">Selecciona variante</h3>
-              <button onClick={() => setShowVariantModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => setShowVariantModal(false)} className="text-gray-400">✕</button>
             </div>
             <div className="p-5 space-y-3">
               {variants.map((variant) => (
-                <div key={variant._id} onClick={() => addVariantToCart(variant)} className="p-4 border border-gray-100 rounded-xl cursor-pointer hover:border-green-300 hover:shadow-md transition-all flex justify-between items-center">
+                <div key={variant._id} onClick={() => addVariantToCart(variant)} className="p-4 border border-gray-100 rounded-xl cursor-pointer hover:border-green-300 transition-all flex justify-between items-center">
                   <div>
                     <div className="font-medium text-gray-800">{variant.name}</div>
                     <div className="text-xs text-gray-400">Stock: {variant.stock}</div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-green-600 font-bold">Q{variant.price}</div>
-                    <button className="mt-1 px-3 py-1 bg-green-600 text-white text-xs rounded-lg">Agregar</button>
-                  </div>
+                  <div className="text-green-600 font-bold text-right">Q{variant.price}</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
-Escáner de Cámara</h3>
+
+      {/* MODAL ESCÁNER NATIVO */}
+      {showNativeScanner && (
+        <div className="fixed inset-0 bg-black z-[100] flex flex-col">
+          <div className="p-4 bg-gray-900 flex justify-between items-center border-b border-gray-800">
+            <h3 className="font-bold text-green-500">📷 Lector de Cámara</h3>
             <button onClick={stopNativeScanner} className="bg-white/10 text-white px-4 py-1.5 rounded-xl text-xs font-bold">CERRAR</button>
           </div>
-          
-          <div className="flex-1 relative bg-black flex items-center justify-center">
-            <div id="native-reader" className="w-full h-full max-w-lg"></div>
-            
-            {/* Overlay de guía */}
+          <div className="flex-1 relative bg-black">
+            <div id="native-reader" className="w-full h-full"></div>
             <div className="absolute inset-0 border-[40px] border-black/60 pointer-events-none">
-              <div className="w-full h-full border-2 border-green-500/30 rounded-2xl relative">
-                 <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-500 rounded-tl-xl"></div>
-                 <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-500 rounded-tr-xl"></div>
-                 <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-500 rounded-bl-xl"></div>
-                 <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-500 rounded-br-xl"></div>
-              </div>
+              <div className="w-full h-full border-2 border-green-500/30 rounded-2xl"></div>
             </div>
-          </div>
-          
-          <div className="p-8 bg-gray-900 text-center">
-            <p className="text-gray-400 text-sm">Apunta la cámara al código de barras del producto</p>
           </div>
         </div>
       )}
