@@ -101,7 +101,16 @@ function App() {
         {/* Rutas públicas */}
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
-        <Route path="/scanner/:sessionId" element={<MobileScanner />} />
+        
+        {/* Escáner Móvil - Protegido */}
+        <Route 
+          path="/scanner" 
+          element={
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE]} redirectTo="/login">
+              <MobileScanner />
+            </ProtectedRoute>
+          } 
+        />
         
         {/* Redirección raíz */}
         <Route path="/" element={<Navigate to="/admin" replace />} />

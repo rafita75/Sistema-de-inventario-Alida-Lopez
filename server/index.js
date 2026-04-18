@@ -119,80 +119,45 @@ app.use('/api/audit', require('./modules/admin/routes/audit'));
 // ============================================
 // SOCKET.IO - USUARIOS CONECTADOS Y ESCÁNER MÓVIL
 // ============================================
-const connectedUsers = new Map();
-
 io.on('connection', (socket) => {
   console.log('🔌 Cliente conectado:', socket.id);
 
-  // Registro general de notificaciones
+  // Registro general de notificaciones (Salas por Usuario)
   socket.on('register-user', (userId) => {
     if (userId) {
-      connectedUsers.set(userId.toString(), socket.id);
-      socket.join(`user-${userId}`);
-      console.log(`✅ Usuario ${userId} conectado`);
+      const roomName = `user-${userId}`;
+      socket.join(roomName);
+      console.log(`✅ Usuario ${userId} unido a sala: ${roomName}`);
     }
   });
 
   // ==========================================
-  // EMPAREJAMIENTO PC-MÓVIL (ESCÁNER)
+  // EMPAREJAMIENTO PC-MÓVIL (Escáner Automático)
   // ==========================================
-  // La PC crea o se une a una sala de sesión
-  socket.on('join-pos-session', (sessionId) => {
-    socket.join(`pos-${sessionId}`);
-    console.log(`💻 PC unida a sesión POS: ${sessionId}`);
-  });
-
-  // El Celular se une a la misma sala usando el QR
-  socket.on('join-scanner-session', (sessionId) => {
-    socket.join(`pos-${sessionId}`);
-    console.log(`📱 Móvil unido a sesión POS: ${sessionId}`);
-    // Avisar a la PC que el celular está listo
-    socket.to(`pos-${sessionId}`).emit('scanner-connected', { success: true });
-  });
-
-  // El Celular escanea un código y lo envía a la PC
+  // El Celular escanea un código y lo envía a la sala del usuario
   socket.on('send-barcode', (data) => {
-    const { sessionId, userId, barcode } = data;
-    console.log(`📡 Código de barras ${barcode} enviado. Sesión: ${sessionId}, Usuario: ${userId}`);
-    
-    // Reenviar a la sesión específica (Retrocompatibilidad)
-    if (sessionId) {
-      socket.to(`pos-${sessionId}`).emit('barcode-received', { barcode });
-    }
-    
-    // Reenviar a la sala del usuario (Nueva conexión automática)
-    if (userId) {
-      socket.to(`user-${userId}`).emit('barcode-received', { barcode });
+    const { userId, barcode } = data;
+    if (userId && barcode) {
+      const roomName = `user-${userId}`;
+      // Enviar a todos en la sala EXCEPTO al que lo envía (el celular)
+      socket.to(roomName).emit('barcode-received', { barcode });
+      console.log(`📡 Código ${barcode} enviado a la sala: ${roomName}`);
     }
   });
 
   socket.on('disconnect', () => {
     console.log('❌ Cliente desconectado:', socket.id);
-
-    for (let [userId, socketId] of connectedUsers.entries()) {
-      if (socketId === socket.id) {
-        connectedUsers.delete(userId);
-        console.log(`🧹 Usuario ${userId} eliminado`);
-        break;
-      }
-    }
   });
 });
 
 // ============================================
-// FUNCIÓN GLOBAL DE NOTIFICACIONES
+// FUNCIÓN GLOBAL DE NOTIFICACIONES (SOCKET)
 // ============================================
 const sendNotification = (userId, notification) => {
-  const socketId = connectedUsers.get(userId);
-
-  if (socketId) {
-    io.to(socketId).emit('new-notification', notification);
-    console.log(`📨 Notificación enviada a ${userId}`);
-    return true;
-  }
-
-  console.log(`⚠️ Usuario ${userId} no conectado`);
-  return false;
+  const roomName = `user-${userId}`;
+  io.to(roomName).emit('new-notification', notification);
+  console.log(`📨 Notificación de Socket enviada a la sala: ${roomName}`);
+  return true;
 };
 
 app.set('sendNotification', sendNotification);

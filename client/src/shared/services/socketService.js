@@ -19,43 +19,41 @@ function urlBase64ToUint8Array(base64String) {
 
 export const initSocket = (userId) => {
   if (!socket) {
-    console.log('🔄 Inicializando socket en puerto 5000');
-    socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000');
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    console.log('🔄 Conectando socket a:', SOCKET_URL);
+    
+    socket = io(SOCKET_URL, {
+      withCredentials: true,
+      transports: ['websocket', 'polling'], // Forzar transportes compatibles
+      reconnectionAttempts: 5
+    });
     
     socket.on('connect', () => {
       console.log('✅ Socket conectado, ID:', socket.id);
-      const userIdToSend = pendingUserId || userId;
-      if (userIdToSend) {
-        socket.emit('register-user', userIdToSend);
+      const id = userId || pendingUserId;
+      if (id) {
+        socket.emit('register-user', id);
         pendingUserId = null;
       }
-      
-      // Intentar suscripción Push en segundo plano
       subscribeToPushNotifications();
     });
     
     socket.on('connect_error', (error) => {
-      console.error('❌ Error de conexión:', error);
+      console.error('❌ Error de conexión Socket:', error.message);
     });
-    
-    socket.on('disconnect', () => {
-      console.log('🔌 Socket desconectado');
-    });
-  } else if (userId && socket.connected) {
-    socket.emit('register-user', userId);
   } else if (userId) {
-    pendingUserId = userId;
+    if (socket.connected) {
+      socket.emit('register-user', userId);
+    } else {
+      pendingUserId = userId;
+    }
   }
   
   return socket;
 };
 
-// Función para suscribirse a notificaciones push reales (segundo plano)
 export const subscribeToPushNotifications = async () => {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    console.warn('⚠️ Notificaciones push no soportadas');
-    return;
-  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
   try {
     const registration = await navigator.serviceWorker.ready;
@@ -66,52 +64,32 @@ export const subscribeToPushNotifications = async () => {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
       });
-      console.log('✅ Nueva suscripción push creada');
     }
 
-    // Enviar suscripción al servidor
     await api.post('/auth/push-subscribe', { subscription });
-    console.log('📡 Push sincronizado');
-
+    console.log('📡 Push Web OK');
   } catch (error) {
-    console.log('ℹ️ Suscripción push pendiente de permisos');
+    console.log('ℹ️ Push requiere interacción del usuario');
   }
 };
 
 export const getSocket = () => socket;
 
-export const disconnectSocket = () => {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
-};
-
 export const requestNotificationPermission = async () => {
   if (!('Notification' in window)) return false;
-  
   if (Notification.permission === 'granted') return true;
   
-  if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      subscribeToPushNotifications();
-    }
-    return permission === 'granted';
-  }
-  
-  return false;
+  const permission = await Notification.requestPermission();
+  if (permission === 'granted') subscribeToPushNotifications();
+  return permission === 'granted';
 };
 
 export const showNotification = (title, options) => {
-  if (Notification.permission === 'granted') {
+  // Notificación nativa del navegador (si la pestaña está abierta)
+  if (Notification.permission === 'granted' && document.visibilityState !== 'visible') {
     const notification = new Notification(title, options);
-    setTimeout(() => notification.close(), 5000);
     notification.onclick = () => {
       window.focus();
-      if (options?.data?.url) {
-        window.location.href = options.data.url;
-      }
       notification.close();
     };
   }
