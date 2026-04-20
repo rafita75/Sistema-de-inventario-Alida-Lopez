@@ -32,6 +32,8 @@ export default function POS({ onClose, onSaleComplete }) {
   
   // Referencias
   const barcodeRef = useRef(null);
+  const lastScannedCodeRef = useRef(null);
+  const lastScanTimeRef = useRef(0);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
 
@@ -89,6 +91,17 @@ export default function POS({ onClose, onSaleComplete }) {
 
   const submitBarcode = async (code) => {
     if (!code.trim()) return;
+
+    // Lógica de bloqueo (Cooldown) para evitar escaneos múltiples del mismo item
+    const now = Date.now();
+    if (lastScannedCodeRef.current === code && (now - lastScanTimeRef.current) < 2000) {
+      console.log("🚫 Escaneo duplicado ignorado (cooldown)");
+      return;
+    }
+
+    lastScannedCodeRef.current = code;
+    lastScanTimeRef.current = now;
+
     try {
       const product = await getProductByBarcode(code);
       if (product.isVariant) {
@@ -119,6 +132,8 @@ export default function POS({ onClose, onSaleComplete }) {
     } catch (error) {
       console.error(error);
       setBarcodeInput('');
+      // Limpiar el bloqueo si hubo error para permitir re-intentar
+      lastScannedCodeRef.current = null;
     }
   };
 
