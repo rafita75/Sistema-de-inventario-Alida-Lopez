@@ -2,11 +2,12 @@ const webpush = require('web-push');
 const User = require('../modules/login/models/User');
 
 // Configurar llaves VAPID
-// Asegúrate de tener estas variables en tu .env
+// IMPORTANTE: Estas llaves DEBEN estar en tu archivo .env
+// No usar fallbacks hardcodeados en producción
 webpush.setVapidDetails(
   'mailto:info@libreria-ayc.com',
-  process.env.VAPID_PUBLIC_KEY || 'BIqCZYmZJqq53fJCwLPgvKSDbRaQiGQnrSeX3MoWS5gxIh1tuKUO3haEu2LGCAbmE2TqSg7iQ7zkTGgcySc2tvI',
-  process.env.VAPID_PRIVATE_KEY || 'qxkYg8Xto-rpAQVquEG_jy4LWAUzMeH7Xfb2LCi2sYI'
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
 );
 
 /**

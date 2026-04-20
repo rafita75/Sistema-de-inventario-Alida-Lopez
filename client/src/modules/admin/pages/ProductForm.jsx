@@ -6,8 +6,11 @@ import { getSuppliers, createSupplier } from '../../../shared/services/supplierS
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
 import VariantManager from './VariantManager';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
+import MultiImageUpload from '../../../shared/components/upload/MultiImageUpload';
 
 export default function ProductForm({ product, categories, onSuccess, onCancel }) {
+  const { notify } = useNotification();
   const [hasVariants, setHasVariants] = useState(product?.hasVariants || false);
   const [variants, setVariants] = useState(product?.variants || []);
   const [loading, setLoading] = useState(false);
@@ -29,6 +32,7 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
     supplierId: product?.supplierId?._id || product?.supplierId || '',
     categoryId: product?.categoryId?._id || '',
     images: product?.images || [],
+    thumbnail: product?.thumbnail || '',
     sku: product?.sku || '',
     barcode: product?.barcode || '',
     price: product?.price || '',
@@ -59,7 +63,8 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
       setFormData({ ...formData, brandId: newBrand._id });
       setShowBrandModal(false);
       setQuickData({ name: '', phone: '' });
-    } catch (e) { alert('Error al crear marca'); }
+      notify('Marca creada correctamente', 'success');
+    } catch (e) { notify('Error al crear marca', 'error'); }
   };
 
   // Lógica UX: Guardar Proveedor rápido
@@ -72,11 +77,20 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
       setFormData({ ...formData, supplierId: newSupplier._id });
       setShowSupplierModal(false);
       setQuickData({ name: '', phone: '' });
-    } catch (e) { alert('Error al crear proveedor'); }
+      notify('Proveedor creado correctamente', 'success');
+    } catch (e) { notify('Error al crear proveedor', 'error'); }
   };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleImagesChange = (images) => {
+    setFormData({ 
+      ...formData, 
+      images: images,
+      thumbnail: images.length > 0 ? images[0].url : '' 
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -102,11 +116,18 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
     }
     
     try {
-      if (product) await updateProduct(product._id, submitData);
-      else await createProduct(submitData);
+      if (product) {
+        await updateProduct(product._id, submitData);
+        notify('Producto actualizado correctamente', 'success');
+      } else {
+        await createProduct(submitData);
+        notify('Producto creado correctamente', 'success');
+      }
       onSuccess();
     } catch (err) {
-      setError(err.response?.data?.error || 'Error al guardar producto');
+      const msg = err.response?.data?.error || 'Error al guardar producto';
+      setError(msg);
+      notify(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -161,6 +182,20 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
             </select>
           </div>
         </div>
+
+        {/* IMÁGENES PARA PRODUCTO ÚNICO */}
+        {!hasVariants && (
+          <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
+            <h4 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+              🖼️ Fotos del producto
+            </h4>
+            <MultiImageUpload
+              onImagesChange={handleImagesChange}
+              initialImages={formData.images}
+              maxImages={5}
+            />
+          </div>
+        )}
 
         {!hasVariants && (
           <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-4">

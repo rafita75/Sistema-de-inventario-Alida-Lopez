@@ -21,7 +21,8 @@ import EmployeesManager from './EmployeesManager';
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth(); 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const perms = user?.permissions || {};
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('');
@@ -42,16 +43,16 @@ export default function AdminDashboard() {
     menuItems.push({ id: 'dashboard', label: 'Dashboard', icon: '📊', group: 'admin' });
     menuItems.push({ id: 'employees', label: 'Empleados', icon: '👥', group: 'admin' });
   }
-  if (isAdmin || user?.viewProducts) menuItems.push({ id: 'products', label: 'Productos', icon: '📦', group: 'gestion' });
-  if (isAdmin || user?.viewCategories) menuItems.push({ id: 'categories', label: 'Categorías', icon: '🏷️', group: 'gestion' });
-  if (isAdmin || user?.viewInvoices) menuItems.push({ id: 'invoices', label: 'Facturación', icon: '🧾', group: 'gestion' });
-  if (isAdmin || user?.viewBrands) menuItems.push({ id: 'brands', label: 'Marcas', icon: '✨', group: 'gestion' });
-  if (isAdmin || user?.viewSuppliers) menuItems.push({ id: 'suppliers', label: 'Proveedores', icon: '🚚', group: 'gestion' });
-  if (isAdmin || user?.printBarcodes) menuItems.push({ id: 'barcodes', label: 'Etiquetas', icon: '🖨️', group: 'gestion' });
-  if (isAdmin || user?.viewInventory) menuItems.push({ id: 'inventory', label: 'Inventario', icon: '📊', group: 'gestion' });
-  if (isAdmin || user?.usePOS) menuItems.push({ id: 'pos', label: 'Punto de Venta', icon: '💳', group: 'operacion' });
-  if (isAdmin || user?.viewAccounting) menuItems.push({ id: 'accounting', label: 'Contabilidad', icon: '💰', group: 'finanzas' });
-  if (isAdmin || user?.performCashClosing) menuItems.push({ id: 'cash-closing', label: 'Cierre de Caja', icon: '🏁', group: 'finanzas' });
+  if (isAdmin || perms.viewProducts) menuItems.push({ id: 'products', label: 'Productos', icon: '📦', group: 'gestion' });
+  if (isAdmin || perms.viewCategories) menuItems.push({ id: 'categories', label: 'Categorías', icon: '🏷️', group: 'gestion' });
+  if (isAdmin || perms.viewInvoices) menuItems.push({ id: 'invoices', label: 'Facturación', icon: '🧾', group: 'gestion' });
+  if (isAdmin || perms.viewBrands) menuItems.push({ id: 'brands', label: 'Marcas', icon: '✨', group: 'gestion' });
+  if (isAdmin || perms.viewSuppliers) menuItems.push({ id: 'suppliers', label: 'Proveedores', icon: '🚚', group: 'gestion' });
+  if (isAdmin || perms.printBarcodes) menuItems.push({ id: 'barcodes', label: 'Etiquetas', icon: '🖨️', group: 'gestion' });
+  if (isAdmin || perms.viewInventory) menuItems.push({ id: 'inventory', label: 'Inventario', icon: '📊', group: 'gestion' });
+  if (isAdmin || perms.usePOS) menuItems.push({ id: 'pos', label: 'Punto de Venta', icon: '💳', group: 'operacion' });
+  if (isAdmin || perms.viewAccounting) menuItems.push({ id: 'accounting', label: 'Contabilidad', icon: '💰', group: 'finanzas' });
+  if (isAdmin || perms.performCashClosing) menuItems.push({ id: 'cash-closing', label: 'Cierre de Caja', icon: '🏁', group: 'finanzas' });
 
   useEffect(() => {
     if (menuItems.length > 0 && !activeTab) setActiveTab(menuItems[0].id);
@@ -123,7 +124,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* SIDEBAR DESKTOP ORIGINAL (Restaurado) */}
+      {/* SIDEBAR DESKTOP ORIGINAL */}
       <aside className={`hidden lg:block fixed top-0 left-0 h-full bg-white shadow-xl transition-all duration-300 z-30 ${sidebarCollapsed ? 'w-20' : 'w-64'}`}>
         <div className="flex flex-col h-full">
           <div className={`p-5 border-b border-gray-100 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
@@ -184,7 +185,7 @@ export default function AdminDashboard() {
         </div>
       </aside>
 
-      {/* CONTENIDO PRINCIPAL (Panel de Información mejorado) */}
+      {/* CONTENIDO PRINCIPAL */}
       <main className={`transition-all duration-300 ${sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'}`}>
         <div className="pt-20 lg:pt-6 p-4 md:p-6 pb-24 lg:pb-6">
           
@@ -260,16 +261,16 @@ export default function AdminDashboard() {
           )}
 
           {activeTab === 'employees' && isAdmin && <EmployeesManager />}
-          {activeTab === 'products' && (isAdmin || user?.viewProducts) && <ProductsManager />}
-          {activeTab === 'categories' && (isAdmin || user?.viewCategories) && <CategoriesManager />}
-          {activeTab === 'invoices' && (isAdmin || user?.viewInvoices) && <InvoicesManager />}
-          {activeTab === 'brands' && (isAdmin || user?.viewBrands) && <BrandsManager />}
-          {activeTab === 'suppliers' && (isAdmin || user?.viewSuppliers) && <SuppliersManager />}
-          {activeTab === 'barcodes' && (isAdmin || user?.printBarcodes) && <PrintBarcodes />}
-          {activeTab === 'inventory' && (isAdmin || user?.viewInventory) && <InventoryManager />}
-          {activeTab === 'pos' && (isAdmin || user?.usePOS) && <POSDashboard onSaleComplete={loadFullDashboard} />}
-          {activeTab === 'accounting' && (isAdmin || user?.viewAccounting) && <AccountingDashboard />}
-          {activeTab === 'cash-closing' && (isAdmin || user?.performCashClosing) && <CashClosingManager />}
+          {activeTab === 'products' && (isAdmin || perms.viewProducts) && <ProductsManager />}
+          {activeTab === 'categories' && (isAdmin || perms.viewCategories) && <CategoriesManager />}
+          {activeTab === 'invoices' && (isAdmin || perms.viewInvoices) && <InvoicesManager />}
+          {activeTab === 'brands' && (isAdmin || perms.viewBrands) && <BrandsManager />}
+          {activeTab === 'suppliers' && (isAdmin || perms.viewSuppliers) && <SuppliersManager />}
+          {activeTab === 'barcodes' && (isAdmin || perms.printBarcodes) && <PrintBarcodes />}
+          {activeTab === 'inventory' && (isAdmin || perms.viewInventory) && <InventoryManager />}
+          {activeTab === 'pos' && (isAdmin || perms.usePOS) && <POSDashboard onSaleComplete={loadFullDashboard} />}
+          {activeTab === 'accounting' && (isAdmin || perms.viewAccounting) && <AccountingDashboard />}
+          {activeTab === 'cash-closing' && (isAdmin || perms.performCashClosing) && <CashClosingManager />}
         </div>
       </main>
     </div>

@@ -4,8 +4,10 @@ import api from '../../../shared/services/api';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
 import Card from '../../core/components/UI/Card';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
 
 export default function CashClosingManager() {
+  const { notify } = useNotification();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [saldoInicial, setSaldoInicial] = useState('0');
@@ -65,27 +67,28 @@ export default function CashClosingManager() {
 
   const handlePerformClosing = async (e) => {
     e.preventDefault();
-    if (!isTimeAllowed) return alert('El cierre de caja solo se permite entre las 6:00 PM y las 11:59 PM');
-    if (contadoFisico === '') return alert('Ingresa el monto físico contado');
+    if (!isTimeAllowed) return notify('El cierre de caja solo se permite entre las 6:00 PM y las 11:59 PM', 'warning');
+    if (contadoFisico === '') return notify('Ingresa el monto físico contado', 'warning');
 
     try {
       const closingData = {
         saldoInicial: sIni,
         ventasEfectivo: ventas,
         totalGastos: gastos,
-        esperadoEnCaja: esperado,
+        esperadoEnCaja: esperado, // 👈 Agregado
         contadoFisico: fisico,
+        diferencia: diferencia, // 👈 Agregado
         notas
       };
 
       await api.post('/accounting/cash-closing', closingData);
-      setMessage('✅ Cierre de caja guardado con éxito');
+      notify('Cierre de caja guardado con éxito', 'success');
       setAlreadyClosed(true);
       setContadoFisico('');
       setNotas('');
       loadHistory();
     } catch (error) {
-      alert(error.response?.data?.error || 'Error al realizar cierre');
+      notify(error.response?.data?.error || 'Error al realizar cierre', 'error');
     }
   };
 

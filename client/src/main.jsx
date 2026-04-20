@@ -3,6 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './modules/login/contexts/AuthContext';
+import { NotificationProvider } from './shared/contexts/NotificationContext';
 import './index.css';
 
 // Registrar Service Worker para notificaciones push
@@ -15,7 +16,9 @@ if ('serviceWorker' in navigator) {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
-      <App />
+      <NotificationProvider>
+        <App />
+      </NotificationProvider>
     </AuthProvider>
   </React.StrictMode>
 );

@@ -1,4 +1,3 @@
-// server/modules/accounting/routes/accounting.js
 const express = require('express');
 const Income = require('../models/Income');
 const Expense = require('../models/Expense');
@@ -7,6 +6,7 @@ const BusinessDebt = require('../models/BusinessDebt');
 const CashMovement = require('../models/CashMovement');
 const CashClosing = require('../models/CashClosing');
 const auth = require('../../login/middleware/auth');
+const { requirePermission } = require('../../../shared/middleware/permissions');
 
 const router = express.Router();
 
@@ -42,17 +42,10 @@ async function updateCash(tipo, monto, descripcion, referenciaId, referenciaMode
 }
 
 // ============================================
-// PERMISOS
-// ============================================
-function canViewAccounting(req) {
-  return req.user.role === 'admin' || (req.user.role === 'employee' && req.user.viewAccounting);
-}
-
-// ============================================
 // RUTAS OPERATIVAS (ESCRITURA)
 // ============================================
 
-router.post('/sale', auth, async (req, res) => {
+router.post('/sale', auth, requirePermission('usePOS'), async (req, res) => {
   try {
     const { monto, descripcion, metodo, clienteNombre, esDeuda } = req.body;
     const income = new Income({
@@ -83,7 +76,7 @@ router.post('/sale', auth, async (req, res) => {
   }
 });
 
-router.post('/expense', auth, async (req, res) => {
+router.post('/expense', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const expense = new Expense({ ...req.body, creadoPor: req.user.id });
     await expense.save();
@@ -94,7 +87,7 @@ router.post('/expense', auth, async (req, res) => {
   }
 });
 
-router.put('/customer-debt/:id/pay', auth, async (req, res) => {
+router.put('/customer-debt/:id/pay', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const debt = await CustomerDebt.findById(req.params.id);
     if (!debt || debt.estado === 'pagado') return res.status(400).json({ error: 'Deuda no válida' });
@@ -124,7 +117,7 @@ router.put('/customer-debt/:id/pay', auth, async (req, res) => {
   }
 });
 
-router.post('/customer-debt', auth, async (req, res) => {
+router.post('/customer-debt', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const debt = new CustomerDebt(req.body);
     await debt.save();
@@ -134,7 +127,7 @@ router.post('/customer-debt', auth, async (req, res) => {
   }
 });
 
-router.post('/business-debt', auth, async (req, res) => {
+router.post('/business-debt', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const debt = new BusinessDebt(req.body);
     await debt.save();
@@ -144,7 +137,7 @@ router.post('/business-debt', auth, async (req, res) => {
   }
 });
 
-router.put('/business-debt/:id/pay', auth, async (req, res) => {
+router.put('/business-debt/:id/pay', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const debt = await BusinessDebt.findById(req.params.id);
     if (!debt || debt.estado === 'pagado') return res.status(400).json({ error: 'Deuda no válida' });
@@ -165,10 +158,8 @@ router.put('/business-debt/:id/pay', auth, async (req, res) => {
 // RUTAS DE CONSULTA (LECTURA)
 // ============================================
 
-router.get('/balance-general', auth, async (req, res) => {
+router.get('/balance-general', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
-    if (!canViewAccounting(req)) return res.status(403).json({ error: 'No autorizado' });
-
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
     twelveMonthsAgo.setDate(1);
@@ -203,7 +194,6 @@ router.get('/balance-general', auth, async (req, res) => {
       ])
     ]);
 
-    // Combinar los resultados en un formato legible
     const balanceMap = {};
 
     incomeStats.forEach(stat => {
@@ -235,9 +225,8 @@ router.get('/balance-general', auth, async (req, res) => {
   }
 });
 
-router.get('/dashboard-stats', auth, async (req, res) => {
+router.get('/dashboard-stats', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
-    if (!canViewAccounting(req)) return res.status(403).json({ error: 'No autorizado' });
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
 
     const [statsHoy, statsDeudas] = await Promise.all([
@@ -259,47 +248,101 @@ router.get('/dashboard-stats', auth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error stats' }); }
 });
 
-router.get('/report', auth, async (req, res) => {
+router.get('/report', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
-    if (!canViewAccounting(req)) return res.status(403).json({ error: 'No autorizado' });
+    const { period = 'week', start, end } = req.query;
+    let startDate;
+    let endDate = new Date();
     
-    const { period = 'week' } = req.query;
-    const startDate = new Date();
-    if (period === 'week') startDate.setDate(startDate.getDate() - 7);
-    else startDate.setMonth(startDate.getMonth() - 1);
-    
-    const incomes = await Income.find({ fecha: { $gte: startDate }, esDeuda: false });
-    const expenses = await Expense.find({ fecha: { $gte: startDate } });
-    
-    const dailyData = {};
-    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
-      dailyData[d.toISOString().split('T')[0]] = { income: 0, expense: 0 };
+    if (period === 'week') {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (period === 'month') {
+      startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else if (start && end) {
+      startDate = new Date(start);
+      endDate = new Date(end);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
     }
-    
+
+    const [incomes, expenses] = await Promise.all([
+      Income.find({ fecha: { $gte: startDate, $lte: endDate }, status: 'completed' }).sort({ fecha: 1 }),
+      Expense.find({ fecha: { $gte: startDate, $lte: endDate } }).sort({ fecha: 1 })
+    ]);
+
+    const dailyData = {};
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      dailyData[d.toISOString().split('T')[0]] = { income: 0, expense: 0, profit: 0 };
+    }
+
+    let totalIncomes = 0;
     incomes.forEach(i => {
-      const d = new Date(i.fecha).toISOString().split('T')[0];
-      if (dailyData[d]) dailyData[d].income += i.monto;
+      const d = i.fecha.toISOString().split('T')[0];
+      if (dailyData[d]) {
+        dailyData[d].income += i.monto;
+        totalIncomes += i.monto;
+      }
+    });
+
+    let totalExpenses = 0;
+    const expenseCategories = {};
+    expenses.forEach(e => {
+      const d = e.fecha.toISOString().split('T')[0];
+      if (dailyData[d]) {
+        dailyData[d].expense += e.monto;
+        totalExpenses += e.monto;
+      }
+      if (!expenseCategories[e.categoria]) {
+        expenseCategories[e.categoria] = 0;
+      }
+      expenseCategories[e.categoria] += e.monto;
     });
 
     const dailyLabels = Object.keys(dailyData);
     const dailyIncomes = dailyLabels.map(d => dailyData[d].income);
-    
-    res.json({ dailyLabels, dailyIncomes });
+    const dailyExpenses = dailyLabels.map(d => dailyData[d].expense);
+    const dailyProfits = dailyLabels.map(d => dailyData[d].income - dailyData[d].expense);
+
+    const expenseCategoriesList = Object.keys(expenseCategories).map(cat => ({
+      categoria: cat,
+      total: expenseCategories[cat]
+    }));
+
+    const transactions = [
+      ...incomes.map(i => ({ fecha: i.fecha, tipo: 'ingreso', monto: i.monto, descripcion: i.descripcion, metodo: i.metodo })),
+      ...expenses.map(e => ({ fecha: e.fecha, tipo: 'gasto', monto: e.monto, descripcion: e.descripcion, metodo: 'efectivo' }))
+    ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    res.json({
+      dailyLabels,
+      dailyIncomes,
+      dailyExpenses,
+      dailyProfits,
+      expenseCategories: expenseCategoriesList,
+      totalIncomes,
+      totalExpenses,
+      netProfit: totalIncomes - totalExpenses,
+      transactions
+    });
   } catch (error) {
+    console.error('Error generating report:', error);
     res.status(500).json({ error: 'Error al generar reporte' });
   }
 });
 
-router.get('/dashboard', auth, async (req, res) => {
+router.get('/dashboard', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
-    if (!canViewAccounting(req)) return res.status(403).json({ error: 'No autorizado' });
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const sem = new Date(); sem.setDate(sem.getDate() - 7);
     const mes = new Date(); mes.setMonth(mes.getMonth() - 1);
     const [vH, gH, vS, gS, vM, gM, dC, dN, movs, saldo] = await Promise.all([
-      Income.find({ fecha: { $gte: hoy }, esDeuda: false }), Expense.find({ fecha: { $gte: hoy } }),
-      Income.find({ fecha: { $gte: sem }, esDeuda: false }), Expense.find({ fecha: { $gte: sem } }),
-      Income.find({ fecha: { $gte: mes }, esDeuda: false }), Expense.find({ fecha: { $gte: mes } }),
+      Income.find({ fecha: { $gte: hoy }, esDeuda: false, status: 'completed' }), Expense.find({ fecha: { $gte: hoy } }),
+      Income.find({ fecha: { $gte: sem }, esDeuda: false, status: 'completed' }), Expense.find({ fecha: { $gte: sem } }),
+      Income.find({ fecha: { $gte: mes }, esDeuda: false, status: 'completed' }), Expense.find({ fecha: { $gte: mes } }),
       CustomerDebt.find({ estado: 'pendiente' }), BusinessDebt.find({ estado: 'pendiente' }),
       CashMovement.find().sort({ fecha: -1 }).limit(10), getCurrentCashBalance()
     ]);
@@ -314,7 +357,7 @@ router.get('/dashboard', auth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error dashboard' }); }
 });
 
-router.get('/incomes', auth, async (req, res) => {
+router.get('/incomes', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
     const query = {};
@@ -325,7 +368,7 @@ router.get('/incomes', auth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error incomes' }); }
 });
 
-router.get('/expenses', auth, async (req, res) => {
+router.get('/expenses', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const { fechaInicio, fechaFin } = req.query;
     const query = {};
@@ -336,14 +379,14 @@ router.get('/expenses', auth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error expenses' }); }
 });
 
-router.get('/customer-debts', auth, async (req, res) => {
+router.get('/customer-debts', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const debts = await CustomerDebt.find({ estado: 'pendiente' }).sort({ fecha: -1 });
     res.json(debts);
   } catch (error) { res.status(500).json({ error: 'Error debts' }); }
 });
 
-router.post('/cash-closing', auth, async (req, res) => {
+router.post('/cash-closing', auth, requirePermission('performCashClosing'), async (req, res) => {
   try {
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
@@ -356,7 +399,7 @@ router.post('/cash-closing', auth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al cerrar caja' }); }
 });
 
-router.get('/cash-closings', auth, async (req, res) => {
+router.get('/cash-closings', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const closings = await CashClosing.find().populate('cajeroId', 'name').sort({ fecha: -1 }).limit(30);
     res.json(closings);

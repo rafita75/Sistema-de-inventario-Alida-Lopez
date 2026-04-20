@@ -21,7 +21,9 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { sku: { $regex: search, $options: 'i' } },
-        { barcode: { $regex: search, $options: 'i' } }
+        { barcode: { $regex: search, $options: 'i' } },
+        { "variants.sku": { $regex: search, $options: 'i' } },
+        { "variants.barcode": { $regex: search, $options: 'i' } }
       ];
     }
     

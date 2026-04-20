@@ -9,8 +9,12 @@ import ExpenseModal from '../components/expenses/ExpenseModal';
 import CustomerDebtModal from '../components/debts/CustomerDebtModal';
 import BusinessDebtModal from '../components/debts/BusinessDebtModal';
 import ReportsModal from '../components/reports/ReportsModal';
+import ConfirmModal from '../../core/components/UI/ConfirmModal';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
+import { CardSkeleton } from '../../core/components/UI/Skeleton';
 
 export default function AccountingDashboard() {
+  const { notify } = useNotification();
   const [dashboard, setDashboard] = useState(null);
   const [balanceGeneral, setBalanceGeneral] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,8 +22,11 @@ export default function AccountingDashboard() {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showCustomerDebtModal, setShowCustomerDebtModal] = useState(false);
   const [showBusinessDebtModal, setShowBusinessDebtModal] = useState(false);
-  const [message, setMessage] = useState('');
   const [showReports, setShowReports] = useState(false);
+  
+  // Estados para Confirmación
+  const [confirmDebt, setConfirmDebt] = useState({ open: false, id: null, type: 'customer' });
+  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -36,42 +43,30 @@ export default function AccountingDashboard() {
       setBalanceGeneral(balanceRes.data);
     } catch (error) {
       console.error('Error cargando datos contables:', error);
+      notify('Error al cargar datos financieros', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const payCustomerDebt = useCallback(async (debtId) => {
-    if (!confirm('¿Marcar esta deuda como pagada? Se registrará el ingreso en caja.')) return;
-    
+  const handlePayDebt = async () => {
+    setPaying(true);
     try {
-      await api.put(`/accounting/customer-debt/${debtId}/pay`, {
-        metodo: 'efectivo'
-      });
+      if (confirmDebt.type === 'customer') {
+        await api.put(`/accounting/customer-debt/${confirmDebt.id}/pay`, { metodo: 'efectivo' });
+        notify('Deuda de cliente pagada', 'success');
+      } else {
+        await api.put(`/accounting/business-debt/${confirmDebt.id}/pay`);
+        notify('Deuda de negocio pagada', 'success');
+      }
+      setConfirmDebt({ open: false, id: null, type: 'customer' });
       loadData();
-      setMessage('✅ Deuda marcada como pagada');
-      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
-      console.error('Error al pagar deuda:', error);
-      setMessage('❌ Error al pagar deuda');
-      setTimeout(() => setMessage(''), 3000);
+      notify('Error al procesar pago', 'error');
+    } finally {
+      setPaying(false);
     }
-  }, []);
-
-  const payBusinessDebt = useCallback(async (debtId) => {
-    if (!confirm('¿Marcar esta deuda como pagada? Se registrará el gasto.')) return;
-    
-    try {
-      await api.put(`/accounting/business-debt/${debtId}/pay`);
-      loadData();
-      setMessage('✅ Deuda pagada');
-      setTimeout(() => setMessage(''), 3000);
-    } catch (error) {
-      console.error('Error al pagar deuda:', error);
-      setMessage('❌ Error al pagar deuda');
-      setTimeout(() => setMessage(''), 3000);
-    }
-  }, []);
+  };
 
   const formatMonth = useCallback((monthStr) => {
     const [year, month] = monthStr.split('-');
@@ -83,8 +78,16 @@ export default function AccountingDashboard() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+      <div className="space-y-6">
+        <div className="h-8 w-48 bg-gray-200 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {[1,2,3,4,5].map(i => <div key={i} className="h-24 bg-gray-100 rounded-2xl animate-pulse" />)}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
       </div>
     );
   }
@@ -102,14 +105,8 @@ export default function AccountingDashboard() {
         </div>
       </div>
 
-      {message && (
-        <div className={`p-4 rounded-xl ${message.includes('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          {message}
-        </div>
-      )}
-
       {/* Botones de acción rápida */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <button
           onClick={() => setShowSaleModal(true)}
           className="flex flex-col items-center gap-2 p-4 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-2xl hover:shadow-lg transition-all"
@@ -140,6 +137,14 @@ export default function AccountingDashboard() {
         >
           <span className="text-3xl">🏪</span>
           <span className="font-semibold text-sm">Deuda negocio</span>
+        </button>
+
+        <button
+          onClick={() => setShowReports(true)}
+          className="flex flex-col items-center gap-2 p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-2xl hover:shadow-lg transition-all"
+        >
+          <span className="text-3xl">📊</span>
+          <span className="font-semibold text-sm">Reportes</span>
         </button>
       </div>
 
@@ -304,7 +309,7 @@ export default function AccountingDashboard() {
                         </p>
                       )}
                       <button
-                        onClick={() => payCustomerDebt(deuda._id)}
+                        onClick={() => setConfirmDebt({ open: true, id: deuda._id, type: 'customer' })}
                         className="mt-2 text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition"
                       >
                         Pagar
@@ -350,7 +355,7 @@ export default function AccountingDashboard() {
                         </p>
                       )}
                       <button
-                        onClick={() => payBusinessDebt(deuda._id)}
+                        onClick={() => setConfirmDebt({ open: true, id: deuda._id, type: 'business' })}
                         className="mt-2 text-xs bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition"
                       >
                         Pagar
@@ -403,8 +408,7 @@ export default function AccountingDashboard() {
         onSuccess={() => {
           setShowSaleModal(false);
           loadData();
-          setMessage('✅ Venta registrada correctamente');
-          setTimeout(() => setMessage(''), 3000);
+          notify('Venta registrada correctamente', 'success');
         }}
       />
       
@@ -414,8 +418,7 @@ export default function AccountingDashboard() {
         onSuccess={() => {
           setShowExpenseModal(false);
           loadData();
-          setMessage('✅ Gasto registrado correctamente');
-          setTimeout(() => setMessage(''), 3000);
+          notify('Gasto registrado correctamente', 'success');
         }}
       />
       
@@ -425,8 +428,7 @@ export default function AccountingDashboard() {
         onSuccess={() => {
           setShowCustomerDebtModal(false);
           loadData();
-          setMessage('✅ Deuda registrada');
-          setTimeout(() => setMessage(''), 3000);
+          notify('Deuda registrada', 'success');
         }}
       />
       
@@ -436,14 +438,27 @@ export default function AccountingDashboard() {
         onSuccess={() => {
           setShowBusinessDebtModal(false);
           loadData();
-          setMessage('✅ Deuda registrada');
-          setTimeout(() => setMessage(''), 3000);
+          notify('Deuda registrada', 'success');
         }}
       />
 
       <ReportsModal
         isOpen={showReports}
         onClose={() => setShowReports(false)}
+      />
+
+      <ConfirmModal
+        isOpen={confirmDebt.open}
+        onClose={() => setConfirmDebt({ ...confirmDebt, open: false })}
+        onConfirm={handlePayDebt}
+        loading={paying}
+        title="Confirmar Pago"
+        message={confirmDebt.type === 'customer' 
+          ? "¿Marcar esta deuda como pagada? Se registrará el ingreso en caja."
+          : "¿Marcar esta deuda como pagada? Se registrará el gasto."
+        }
+        confirmText="Confirmar Pago"
+        type="success"
       />
     </div>
   );

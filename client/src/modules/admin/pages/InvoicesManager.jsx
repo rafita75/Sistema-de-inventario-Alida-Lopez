@@ -5,8 +5,10 @@ import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
 import Card from '../../core/components/UI/Card';
 import { jsPDF } from 'jspdf';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
 
 export default function InvoicesManager() {
+  const { notify } = useNotification();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('today'); 
@@ -48,6 +50,7 @@ export default function InvoicesManager() {
       setInvoices(data.filter(i => i.tipo === 'venta_pos' || i.items?.length > 0));
     } catch (error) {
       console.error(error);
+      notify('Error al cargar facturas', 'error');
     } finally {
       setLoading(false);
     }
@@ -148,7 +151,7 @@ export default function InvoicesManager() {
   };
 
   const printSelected = () => {
-    if (selectedIds.length === 0) return alert('Selecciona al menos una factura');
+    if (selectedIds.length === 0) return notify('Selecciona al menos una factura', 'warning');
     
     const toPrint = invoices.filter(i => selectedIds.includes(i._id));
     

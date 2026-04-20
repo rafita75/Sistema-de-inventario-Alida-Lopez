@@ -4,11 +4,12 @@ import { getAdminProducts } from '../../../shared/services/productService';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
 import Card from '../../core/components/UI/Card';
-import Barcode from 'react-barcode';
 import JsBarcode from 'jsbarcode';
 import { jsPDF } from 'jspdf';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
 
 export default function PrintBarcodes() {
+  const { notify } = useNotification();
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,8 +19,32 @@ export default function PrintBarcodes() {
     const fetchInitial = async () => {
       setLoading(true);
       try {
-        const data = await getAdminProducts({ limit: 10, search: search });
-        setProducts(data.products || []);
+        const data = await getAdminProducts({ limit: 50, search: search });
+        // Expandir variantes para que aparezcan como items individuales en la búsqueda
+        const expandedItems = [];
+        (data.products || data).forEach(p => {
+          if (p.hasVariants && p.variants?.length > 0) {
+            p.variants.forEach(v => {
+              expandedItems.push({
+                _id: v._id,
+                productId: p._id,
+                name: `${p.name} - ${v.name}`,
+                barcode: v.barcode,
+                sku: v.sku,
+                isVariant: true
+              });
+            });
+          } else {
+            expandedItems.push({
+              _id: p._id,
+              name: p.name,
+              barcode: p.barcode,
+              sku: p.sku,
+              isVariant: false
+            });
+          }
+        });
+        setProducts(expandedItems);
       } catch (error) {
         console.error(error);
       } finally {
@@ -34,23 +59,22 @@ export default function PrintBarcodes() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const addToPrintList = (product) => {
-    const code = product.barcode;
-    if (!code) {
-      alert('Este producto no tiene código de barras.');
+  const addToPrintList = (item) => {
+    if (!item.barcode) {
+      notify('Este item no tiene código de barras.', 'warning');
       return;
     }
     
-    const exists = printList.find(item => item.id === product._id);
+    const exists = printList.find(i => i.id === item._id);
     if (exists) {
-      setPrintList(printList.map(item => 
-        item.id === product._id ? { ...item, copies: item.copies + 1 } : item
+      setPrintList(printList.map(i => 
+        i.id === item._id ? { ...i, copies: i.copies + 1 } : i
       ));
     } else {
       setPrintList([...printList, { 
-        id: product._id, 
-        name: product.name, 
-        barcode: code, 
+        id: item._id, 
+        name: item.name, 
+        barcode: item.barcode, 
         copies: 1 
       }]);
     }
@@ -70,7 +94,6 @@ export default function PrintBarcodes() {
     }));
   };
 
-  // Función mágica para convertir código en imagen
   const getBarcodeDataURL = (text) => {
     const canvas = document.createElement('canvas');
     JsBarcode(canvas, text, {
@@ -99,7 +122,6 @@ export default function PrintBarcodes() {
     let count = 0;
 
     printList.forEach((item) => {
-      // Generar la imagen de las barras una vez por producto
       const barcodeImg = getBarcodeDataURL(item.barcode);
 
       for (let i = 0; i < item.copies; i++) {
@@ -108,20 +130,13 @@ export default function PrintBarcodes() {
           x = 10; y = 15; count = 0;
         }
 
-        // Nombre del producto arriba
         doc.setFontSize(7);
         doc.setFont("helvetica", "bold");
         doc.text(item.name.substring(0, 28), x + 2, y + 2);
-        
-        // Insertar la IMAGEN de las barras
         doc.addImage(barcodeImg, 'PNG', x + 2, y + 4, 40, 20);
-        
-        // Texto de pie
         doc.setFontSize(6);
         doc.setFont("helvetica", "normal");
         doc.text("Librería A&C", x + 15, y + 27);
-
-        // Dibujar borde punteado suave para corte
         doc.setDrawColor(230);
         doc.setLineDashPattern([1, 1], 0);
         doc.rect(x, y - 3, itemWidth, itemHeight);
@@ -148,99 +163,97 @@ export default function PrintBarcodes() {
         </h2>
         <Button 
           variant="primary" 
-          onClick={generatePDF} 
+          onClick={generatePDF}
           disabled={printList.length === 0}
-          className="bg-green-600 w-full sm:w-auto shadow-lg"
+          className="bg-green-600 shadow-lg shadow-green-100"
         >
-          📄 Descargar PDF de Barras ({printList.reduce((sum, i) => sum + i.copies, 0)})
+          📥 Descargar PDF ({printList.reduce((sum, i) => sum + i.copies, 0)} etiquetas)
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Buscador */}
-        <div className="lg:col-span-4">
-          <Card className="p-4 shadow-sm border-gray-100">
-            <label className="block text-sm font-bold text-gray-700 mb-2">1. Buscar productos</label>
-            <Input 
-              placeholder="Nombre o código..." 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Selector de productos */}
+        <div className="lg:col-span-2 space-y-4">
+          <Card className="p-4">
+            <Input
+              placeholder="Buscar producto o variante por nombre..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="focus:ring-green-500"
+              icon="🔍"
             />
             
-            <div className="mt-4 space-y-2 max-h-[450px] overflow-auto pr-1">
-              {loading && <div className="text-center py-4 text-gray-400 animate-pulse">Buscando...</div>}
-              {products.map(p => (
-                <div 
-                  key={p._id} 
-                  onClick={() => addToPrintList(p)}
-                  className="p-3 border border-gray-100 rounded-xl hover:bg-green-50 hover:border-green-200 cursor-pointer flex justify-between items-center group transition-all"
-                >
-                  <div className="overflow-hidden">
-                    <p className="font-bold text-sm text-gray-800 truncate">{p.name}</p>
-                    <p className="text-xs text-green-600 font-mono">{p.barcode}</p>
-                  </div>
-                  <div className="bg-green-600 text-white w-6 h-6 rounded-lg flex items-center justify-center font-bold opacity-0 group-hover:opacity-100 transition-opacity">+</div>
-                </div>
-              ))}
-              {products.length === 0 && !loading && search && (
-                <div className="text-center py-10 text-gray-400 text-sm">No se encontraron productos</div>
-              )}
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+              <div className="max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                      <th className="p-3 text-left">Producto / Variante</th>
+                      <th className="p-3 text-left">Código</th>
+                      <th className="p-3 text-center">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {loading ? (
+                      <tr><td colSpan="3" className="p-8 text-center text-gray-400">Buscando...</td></tr>
+                    ) : products.length === 0 ? (
+                      <tr><td colSpan="3" className="p-8 text-center text-gray-400">No se encontraron resultados</td></tr>
+                    ) : (
+                      products.map(p => (
+                        <tr key={p._id} className="hover:bg-green-50/30 transition-colors">
+                          <td className="p-3 font-medium text-gray-700">
+                            {p.name}
+                            {p.isVariant && <span className="ml-2 text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full uppercase">Variante</span>}
+                          </td>
+                          <td className="p-3 text-gray-500 font-mono text-xs">{p.barcode}</td>
+                          <td className="p-3 text-center">
+                            <button 
+                              onClick={() => addToPrintList(p)}
+                              className="text-green-600 hover:text-green-700 font-bold p-2 bg-green-50 rounded-lg"
+                            >
+                              ➕
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </Card>
         </div>
 
-        {/* Lista */}
-        <div className="lg:col-span-8">
-          <Card className="p-4 min-h-[500px] shadow-sm border-gray-100 bg-gray-50/30">
-            <label className="block text-sm font-bold text-gray-700 mb-4">2. Etiquetas seleccionadas</label>
-            
+        {/* Lista de impresión */}
+        <div className="space-y-4">
+          <h3 className="font-bold text-gray-700 uppercase text-xs tracking-widest px-2 flex justify-between">
+            📋 Cola de impresión
+            <span className="text-green-600">{printList.length} items</span>
+          </h3>
+          
+          <div className="space-y-2 max-h-[600px] overflow-auto pr-2">
             {printList.length === 0 ? (
-              <div className="text-center py-24 text-gray-400">
-                <div className="text-6xl mb-4">🏷️</div>
-                <p className="text-lg">Tu lista de impresión está vacía</p>
-                <p className="text-sm">Añade productos desde el buscador de la izquierda</p>
+              <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center text-gray-400 text-sm">
+                Agrega productos de la lista de la izquierda para comenzar
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {printList.map(item => (
-                  <div key={item.id} className="p-4 border border-gray-200 rounded-2xl bg-white shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1 overflow-hidden">
-                        <p className="font-bold text-gray-800 truncate">{item.name}</p>
-                        <p className="text-xs text-gray-500 font-mono">{item.barcode}</p>
-                      </div>
-                      <button 
-                        onClick={() => removeFromList(item.id)} 
-                        className="bg-red-50 text-red-500 hover:bg-red-500 hover:text-white w-7 h-7 rounded-full flex items-center justify-center transition-colors"
-                      >
-                        ✕
-                      </button>
-                    </div>
-
-                    <div className="flex justify-center bg-gray-50 p-3 rounded-xl border border-dashed border-gray-200 mb-3">
-                      <Barcode 
-                        value={item.barcode} 
-                        width={1.2} 
-                        height={40} 
-                        fontSize={12}
-                        background="transparent"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between bg-white border border-gray-100 p-2 rounded-xl shadow-inner">
-                      <span className="text-xs text-gray-500 font-bold ml-2">COPIAS:</span>
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => updateCopies(item.id, -1)} className="w-9 h-9 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center text-xl font-bold">-</button>
-                        <span className="font-black text-xl w-6 text-center">{item.copies}</span>
-                        <button onClick={() => updateCopies(item.id, 1)} className="w-9 h-9 bg-gray-800 text-white hover:bg-black rounded-lg flex items-center justify-center text-xl font-bold">+</button>
-                      </div>
+              printList.map(item => (
+                <Card key={item.id} className="p-3 animate-fade-in">
+                  <div className="flex justify-between items-start mb-2">
+                    <p className="text-xs font-bold text-gray-800 line-clamp-1">{item.name}</p>
+                    <button onClick={() => removeFromList(item.id)} className="text-gray-300 hover:text-red-500 transition-colors">✕</button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-gray-400">{item.barcode}</span>
+                    <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-2 py-1">
+                      <button onClick={() => updateCopies(item.id, -1)} className="text-green-600 font-bold">−</button>
+                      <span className="font-bold text-sm min-w-[20px] text-center">{item.copies}</span>
+                      <button onClick={() => updateCopies(item.id, 1)} className="text-green-600 font-bold">＋</button>
                     </div>
                   </div>
-                ))}
-              </div>
+                </Card>
+              ))
             )}
-          </Card>
+          </div>
         </div>
       </div>
     </div>

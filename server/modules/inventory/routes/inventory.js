@@ -278,7 +278,8 @@ router.get('/low-stock-variants', auth, async (req, res) => {
             variantName: variant.name,
             stock: variant.stock,
             minStock: minStock,
-            sku: variant.sku
+            sku: variant.sku,
+            purchasePrice: variant.purchasePrice || product.purchasePrice || 0
           });
         }
       }

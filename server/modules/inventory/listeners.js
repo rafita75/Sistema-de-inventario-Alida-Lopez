@@ -13,6 +13,10 @@ function setupInventoryListeners() {
   // ESCUCHAR VENTAS CREADAS (desde POS o Ecommerce)
   // ============================================
   eventBus.on(EVENTS.SALE_CREATED, async (data) => {
+    if (data.skipInventoryUpdate) {
+      console.log(`ℹ️ Inventory: Saltando actualización de stock para venta ${data.saleNumber} (ya procesada en transacción)`);
+      return;
+    }
     console.log(`📦 Inventory recibió venta: ${data.saleNumber}`);
     
     const movements = [];

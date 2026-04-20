@@ -1,19 +1,40 @@
 // client/src/modules/pos/pages/POSDashboard.jsx
 import { useState, useEffect } from 'react';
-import api from '../../../shared/services/api';
 import POS from '../components/POS';
+import api from '../../../shared/services/api';
+import Card from '../../core/components/UI/Card';
 import Button from '../../core/components/UI/Button';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
+import ConfirmModal from '../../core/components/UI/ConfirmModal';
+import { CardSkeleton } from '../../core/components/UI/Skeleton';
 
 export default function POSDashboard() {
+  const { notify } = useNotification();
   const [showPOS, setShowPOS] = useState(false);
   const [stats, setStats] = useState({
     totalVentasHoy: 0,
     totalIngresosHoy: 0,
-    totalDeudasPendientes: 0,
+    totalDeudasHoy: 0,
     ventas: [],
     deudasPendientes: [],
+    totalDeudasPendientes: 0,
     loading: true
   });
+
+  // Estados para Confirmación de Deuda
+  const [confirmDebt, setConfirmDebt] = useState({ open: false, id: null, cliente: '', monto: 0 });
+  const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    await Promise.all([
+      loadTodaySales(),
+      loadPendingDebts()
+    ]);
+  };
 
   async function loadTodaySales() {
     setStats(prev => ({ ...prev, loading: true }));
@@ -41,8 +62,15 @@ export default function POSDashboard() {
         loading: false
       }));
     } catch (error) {
-      console.error('Error cargando ventas del día:', error);
-      setStats(prev => ({ ...prev, loading: false }));
+      console.warn('Acceso limitado a estadísticas de contabilidad');
+      setStats(prev => ({
+        ...prev,
+        totalVentasHoy: 0,
+        totalIngresosHoy: 0,
+        totalDeudasHoy: 0,
+        ventas: [],
+        loading: false
+      }));
     }
   }
 
@@ -59,194 +87,183 @@ export default function POSDashboard() {
         totalDeudasPendientes
       }));
     } catch (error) {
-      console.error('Error cargando deudas pendientes:', error);
+      console.warn('Acceso limitado a deudas de clientes');
+      setStats(prev => ({
+        ...prev,
+        deudasPendientes: [],
+        totalDeudasPendientes: 0
+      }));
     }
   }
 
-  useEffect(() => {
-    if (!showPOS) {
-      loadTodaySales();
-      loadPendingDebts();
+  const handlePayDebt = async () => {
+    setPaying(true);
+    try {
+      await api.put(`/accounting/customer-debt/${confirmDebt.id}/pay`, { metodo: 'efectivo' });
+      notify('Pago registrado correctamente', 'success');
+      setConfirmDebt({ open: false, id: null, cliente: '', monto: 0 });
+      loadDashboardData();
+    } catch (error) {
+      notify('Error al registrar pago', 'error');
+    } finally {
+      setPaying(false);
     }
-  }, [showPOS]);
-
-  const formatTime = (date) => new Date(date).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-  const formatDate = (date) => new Date(date).toLocaleDateString('es', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-  if (showPOS) {
-    return <POS onClose={() => setShowPOS(false)} onSaleComplete={() => {
-      loadTodaySales();
-      loadPendingDebts();
-    }} />;
-  }
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header con botón principal */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
             <span className="w-1 h-6 bg-green-600 rounded-full"></span>
             💳 Punto de Venta
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">Ventas en mostrador y control de caja</p>
+          </h2>
+          <p className="text-gray-500 text-sm mt-1">Registra nuevas ventas y abonos de clientes</p>
         </div>
-        
         <Button 
           variant="primary" 
-          onClick={() => setShowPOS(true)}
-          className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+          onClick={() => setShowPOS(true)} 
+          className="bg-gradient-to-r from-green-600 to-green-700 h-14 px-8 text-lg font-black shadow-xl shadow-green-100 hover:scale-105 active:scale-95 transition-all"
         >
-          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-          Abrir Caja
+          🚀 NUEVA VENTA
         </Button>
       </div>
 
-      {/* Tarjetas de resumen */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-r from-green-50 to-green-100 border border-green-200 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-green-600 font-medium">Ventas del día</p>
-              <p className="text-3xl font-bold text-green-700">{stats.totalVentasHoy}</p>
-              <p className="text-xs text-green-500 mt-1">transacciones</p>
-            </div>
-            <div className="text-4xl">💰</div>
-          </div>
+      {stats.loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
-        
-        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-blue-600 font-medium">Ingresos en efectivo</p>
-              <p className="text-3xl font-bold text-blue-700">Q{stats.totalIngresosHoy.toLocaleString()}</p>
-              <p className="text-xs text-blue-500 mt-1">caja actual</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="bg-white p-6 border-l-4 border-l-green-600 shadow-sm">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Ventas de Hoy</p>
+            <div className="flex items-center justify-between">
+              <p className="text-3xl font-black text-gray-800">{stats.totalVentasHoy}</p>
+              <div className="text-2xl">🛍️</div>
             </div>
-            <div className="text-4xl">💵</div>
-          </div>
-        </div>
-        
-        <div className="bg-gradient-to-r from-yellow-50 to-yellow-100 border border-yellow-200 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-yellow-600 font-medium">Créditos del día</p>
-              <p className="text-3xl font-bold text-yellow-700">Q{stats.totalDeudasHoy?.toLocaleString() || 0}</p>
-              <p className="text-xs text-yellow-500 mt-1">ventas a crédito</p>
+          </Card>
+          <Card className="bg-white p-6 border-l-4 border-l-green-600 shadow-sm">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Efectivo Ingresado</p>
+            <div className="flex items-center justify-between">
+              <p className="text-3xl font-black text-green-600">Q{stats.totalIngresosHoy.toLocaleString()}</p>
+              <div className="text-2xl">💵</div>
             </div>
-            <div className="text-4xl">📝</div>
-          </div>
+          </Card>
+          <Card className="bg-white p-6 border-l-4 border-l-yellow-500 shadow-sm">
+            <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Ventas a Crédito</p>
+            <div className="flex items-center justify-between">
+              <p className="text-3xl font-black text-yellow-600">Q{stats.totalDeudasHoy.toLocaleString()}</p>
+              <div className="text-2xl">📝</div>
+            </div>
+          </Card>
         </div>
+      )}
 
-        <div className="bg-gradient-to-r from-red-50 to-red-100 border border-red-200 rounded-2xl p-5">
-          <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Tabla de ventas recientes */}
+        <Card title="Últimas ventas" className="shadow-sm border-gray-100">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-widest">
+                <tr>
+                  <th className="p-4 text-left">Factura</th>
+                  <th className="p-4 text-left">Cliente</th>
+                  <th className="p-4 text-right">Total</th>
+                  <th className="p-4 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {stats.ventas.map(venta => (
+                  <tr key={venta._id} className="hover:bg-gray-50 transition">
+                    <td className="p-4 font-mono font-bold text-green-700">#{venta.invoiceNumber || 'POS'}</td>
+                    <td className="p-4">
+                      <p className="font-bold text-gray-800">{venta.clienteNombre}</p>
+                      <p className="text-[10px] text-gray-400 uppercase">{venta.metodo}</p>
+                    </td>
+                    <td className="p-4 text-right font-black text-gray-900">Q{venta.monto.toLocaleString()}</td>
+                    <td className="p-4 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${venta.esDeuda ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+                        {venta.esDeuda ? 'DEUDA' : 'PAGADO'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {stats.ventas.length === 0 && (
+                  <tr><td colSpan="4" className="p-8 text-center text-gray-400">No hay ventas registradas hoy</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* Deudas pendientes */}
+        <Card title="Cuentas por Cobrar" className="shadow-sm border-gray-100">
+          <div className="flex items-center justify-between mb-4 bg-red-50 p-4 rounded-2xl border border-red-100">
             <div>
-              <p className="text-sm text-red-600 font-medium">Deudas pendientes</p>
+              <p className="text-xs font-black text-red-400 uppercase tracking-widest">Total por recuperar</p>
               <p className="text-3xl font-bold text-red-700">Q{stats.totalDeudasPendientes.toLocaleString()}</p>
-              <p className="text-xs text-red-500 mt-1">por cobrar</p>
             </div>
             <div className="text-4xl">⚠️</div>
           </div>
-        </div>
-      </div>
-
-      {/* Deudas pendientes */}
-      {stats.deudasPendientes.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 border-l-4 border-l-red-500">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-              <span>⚠️</span> Deudas pendientes por cobrar
-            </h3>
-          </div>
           <div className="space-y-3">
-            {stats.deudasPendientes.map((deuda) => (
-              <div key={deuda._id} className="flex justify-between items-center p-4 bg-red-50 rounded-xl">
+            {stats.deudasPendientes.map(deuda => (
+              <div key={deuda._id} className="p-4 bg-white border border-gray-100 rounded-2xl flex justify-between items-center hover:shadow-md transition-shadow">
                 <div>
-                  <p className="font-medium text-gray-800">{deuda.clienteNombre}</p>
-                  <p className="text-xs text-gray-500">Desde: {formatDate(deuda.fecha)}</p>
+                  <p className="font-black text-gray-800">{deuda.clienteNombre}</p>
+                  <p className="text-xs text-gray-400">{new Date(deuda.fecha).toLocaleDateString()}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-red-600">Q{deuda.monto.toLocaleString()}</p>
+                  <p className="font-black text-yellow-600">Q{deuda.monto.toLocaleString()}</p>
                   <button 
-                    onClick={async () => {
-                      if (confirm(`¿Marcar como pagada la deuda de ${deuda.clienteNombre} por Q${deuda.monto}?`)) {
-                        await api.put(`/accounting/customer-debt/${deuda._id}/pay`, { metodo: 'efectivo' });
-                        loadPendingDebts();
-                        loadTodaySales();
-                      }
-                    }}
-                    className="mt-2 text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 transition"
+                    onClick={() => setConfirmDebt({ 
+                      open: true, 
+                      id: deuda._id, 
+                      cliente: deuda.clienteNombre, 
+                      monto: deuda.monto 
+                    })}
+                    className="text-[10px] font-black uppercase text-green-600 hover:underline mt-1"
                   >
-                    Marcar pagada
+                    Marcar Pagado
                   </button>
                 </div>
               </div>
             ))}
+            {stats.deudasPendientes.length === 0 && (
+              <p className="text-center py-8 text-gray-400 italic">No hay deudas pendientes ✅</p>
+            )}
           </div>
-        </div>
-      )}
-
-      {/* Ventas recientes */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <span className="w-1 h-4 bg-green-500 rounded-full"></span>
-            📋 Ventas de hoy
-          </h3>
-          <button 
-            onClick={loadTodaySales}
-            className="text-sm text-green-600 hover:text-green-700 flex items-center gap-1"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Actualizar
-          </button>
-        </div>
-        
-        {stats.loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto"></div>
-          </div>
-        ) : stats.ventas.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <div className="text-5xl mb-3">🛒</div>
-            <p>No hay ventas registradas hoy</p>
-            <p className="text-sm text-gray-400 mt-1">Haz clic en "Abrir Caja" para comenzar</p>
-          </div>
-        ) : (
-          <div className="space-y-3 max-h-96 overflow-auto">
-            {stats.ventas.map((venta) => (
-              <div key={venta._id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      venta.esDeuda ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                    }`}>
-                      {venta.esDeuda ? '📝 Crédito' : '💰 Efectivo'}
-                    </span>
-                    <span className="text-sm text-gray-500">{formatTime(venta.fecha)}</span>
-                  </div>
-                  <p className="font-medium text-gray-800 mt-2">{venta.descripcion}</p>
-                  <p className="text-xs text-gray-400 mt-1">{venta.clienteNombre || 'Cliente mostrador'}</p>
-                </div>
-                <div className="text-right">
-                  <p className={`text-lg font-bold ${venta.esDeuda ? 'text-yellow-600' : 'text-green-600'}`}>
-                    Q{venta.monto.toLocaleString()}
-                  </p>
-                  <p className="text-xs text-gray-400 capitalize mt-1">{venta.metodo}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        </Card>
       </div>
 
-      {/* Consejo rápido */}
-      <div className="bg-gray-50 rounded-xl p-4 text-center">
-        <p className="text-sm text-gray-600">
-          💡 <span className="font-medium">Consejo:</span> Usa el lector de código de barras para agregar productos rápidamente. 
+      {showPOS && (
+        <POS 
+          onClose={() => setShowPOS(false)} 
+          onSaleComplete={() => {
+            loadDashboardData();
+          }}
+        />
+      )}
+
+      <ConfirmModal
+        isOpen={confirmDebt.open}
+        onClose={() => setConfirmDebt({ ...confirmDebt, open: false })}
+        onConfirm={handlePayDebt}
+        loading={paying}
+        title="Confirmar Cobro"
+        message={`¿Deseas marcar como pagada la deuda de ${confirmDebt.cliente} por Q${confirmDebt.monto.toLocaleString()}?`}
+        confirmText="Confirmar Pago"
+        type="success"
+      />
+
+      <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
+        <h4 className="font-bold text-blue-800 flex items-center gap-2 mb-2">
+          <span>💡</span> Consejos de uso
+        </h4>
+        <p className="text-blue-600 text-sm leading-relaxed">
+          <span className="font-black">Escáner:</span> Usa el lector de código de barras para agregar productos rápidamente. 
           Las ventas a crédito se registran automáticamente como deudas pendientes hasta que se marquen como pagadas.
         </p>
       </div>

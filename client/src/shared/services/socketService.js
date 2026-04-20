@@ -3,8 +3,7 @@ import { io } from 'socket.io-client';
 import api from './api';
 
 let socket = null;
-let pendingUserId = null;
-const VAPID_PUBLIC_KEY = 'BIqCZYmZJqq53fJCwLPgvKSDbRaQiGQnrSeX3MoWS5gxIh1tuKUO3haEu2LGCAbmE2TqSg7iQ7zkTGgcySc2tvI';
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BIqCZYmZJqq53fJCwLPgvKSDbRaQiGQnrSeX3MoWS5gxIh1tuKUO3haEu2LGCAbmE2TqSg7iQ7zkTGgcySc2tvI';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -18,35 +17,35 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 export const initSocket = (userId) => {
+  const token = localStorage.getItem('token');
+  
+  if (!token) {
+    console.warn('⚠️ No hay token para inicializar Socket');
+    return null;
+  }
+
   if (!socket) {
     const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
     console.log('🔄 Conectando socket a:', SOCKET_URL);
     
     socket = io(SOCKET_URL, {
+      auth: { token }, // 👈 Enviar token para autenticación
       withCredentials: true,
-      transports: ['websocket', 'polling'], // Forzar transportes compatibles
+      transports: ['websocket', 'polling'],
       reconnectionAttempts: 5
     });
     
     socket.on('connect', () => {
-      console.log('✅ Socket conectado, ID:', socket.id);
-      const id = userId || pendingUserId;
-      if (id) {
-        socket.emit('register-user', id);
-        pendingUserId = null;
-      }
+      console.log('✅ Socket conectado y autenticado, ID:', socket.id);
       subscribeToPushNotifications();
     });
     
     socket.on('connect_error', (error) => {
       console.error('❌ Error de conexión Socket:', error.message);
+      if (error.message === 'Autenticación requerida' || error.message === 'Token inválido') {
+        // Podríamos forzar logout aquí si el token es inválido
+      }
     });
-  } else if (userId) {
-    if (socket.connected) {
-      socket.emit('register-user', userId);
-    } else {
-      pendingUserId = userId;
-    }
   }
   
   return socket;
@@ -74,6 +73,13 @@ export const subscribeToPushNotifications = async () => {
 };
 
 export const getSocket = () => socket;
+
+export const disconnectSocket = () => {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+};
 
 export const requestNotificationPermission = async () => {
   if (!('Notification' in window)) return false;

@@ -2,8 +2,10 @@
 import { useState, useEffect } from 'react';
 import { getLowStockProducts, getLowStockVariants, adjustStock, adjustVariantStock } from '../services/inventoryService';
 import Button from '../../core/components/UI/Button';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
 
 export default function LowStockAlert() {
+  const { notify } = useNotification();
   const [products, setProducts] = useState([]);
   const [variants, setVariants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +48,7 @@ export default function LowStockAlert() {
   const handleAdjustStock = async () => {
     if (!selectedItem) return;
     if (adjustQuantity <= 0) {
-      alert('Ingresa una cantidad válida');
+      notify('Ingresa una cantidad válida', 'warning');
       return;
     }
     
@@ -59,9 +61,10 @@ export default function LowStockAlert() {
       }
       setSelectedItem(null);
       loadLowStock();
+      notify('Stock actualizado correctamente', 'success');
     } catch (error) {
       console.error('Error ajustando stock:', error);
-      alert('Error al ajustar stock');
+      notify('Error al ajustar stock', 'error');
     } finally {
       setAdjustLoading(false);
     }

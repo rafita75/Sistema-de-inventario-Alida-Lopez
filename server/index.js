@@ -117,29 +117,42 @@ app.use('/api/employees', require('./modules/admin/routes/employees'));
 app.use('/api/audit', require('./modules/admin/routes/audit'));
 
 // ============================================
-// SOCKET.IO - USUARIOS CONECTADOS Y ESCÁNER MÓVIL
+// SOCKET.IO - AUTENTICACIÓN Y EVENTOS
 // ============================================
-io.on('connection', (socket) => {
-  console.log('🔌 Cliente conectado:', socket.id);
+const jwt = require('jsonwebtoken');
 
-  // Registro general de notificaciones (Salas por Usuario)
-  socket.on('register-user', (userId) => {
-    if (userId) {
-      const roomName = `user-${userId}`;
-      socket.join(roomName);
-      console.log(`✅ Usuario ${userId} unido a sala: ${roomName}`);
-    }
-  });
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token || socket.handshake.query.token;
+  
+  if (!token) {
+    return next(new Error('Autenticación requerida'));
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (err) {
+    next(new Error('Token inválido'));
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log(`🔌 Cliente conectado: ${socket.id} (Usuario: ${socket.user.id})`);
+
+  // Registro en sala privada del usuario
+  const roomName = `user-${socket.user.id}`;
+  socket.join(roomName);
+  console.log(`✅ Usuario ${socket.user.id} unido a su sala privada`);
 
   // ==========================================
   // EMPAREJAMIENTO PC-MÓVIL (Escáner Automático)
   // ==========================================
-  // El Celular escanea un código y lo envía a la sala del usuario
   socket.on('send-barcode', (data) => {
-    const { userId, barcode } = data;
-    if (userId && barcode) {
-      const roomName = `user-${userId}`;
-      // Enviar a todos en la sala EXCEPTO al que lo envía (el celular)
+    const { barcode } = data;
+    if (barcode) {
+      // Usamos el ID del usuario autenticado en el socket, no el que venga en el body
+      const roomName = `user-${socket.user.id}`;
       socket.to(roomName).emit('barcode-received', { barcode });
       console.log(`📡 Código ${barcode} enviado a la sala: ${roomName}`);
     }

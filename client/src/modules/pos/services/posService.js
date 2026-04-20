@@ -2,7 +2,7 @@
 import api from '../../../shared/services/api';
 
 export const searchProducts = async (query, limit = 20) => {
-  const { data } = await api.get('/pos/products/search', { params: { q: query, limit } });
+  const { data } = await api.get('/pos/search', { params: { query, limit } });
   return data;
 };
 
@@ -12,11 +12,11 @@ export const getProductByBarcode = async (barcode) => {
 };
 
 export const getProductVariants = async (productId) => {
-  const { data } = await api.get(`/pos/product/${productId}/variants`);
+  const { data } = await api.get(`/pos/variants/${productId}`);
   return data;
 };
 
 export const registerSale = async (saleData) => {
   const { data } = await api.post('/pos/sale', saleData);
   return data;
-}; 
+};

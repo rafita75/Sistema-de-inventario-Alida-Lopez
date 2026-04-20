@@ -15,6 +15,10 @@ function setupAccountingListeners() {
   // ESCUCHAR VENTAS CREADAS (desde POS o Ecommerce)
   // ============================================
   eventBus.on(EVENTS.SALE_CREATED, async (data) => {
+    if (data.skipAccountingUpdate) {
+      console.log(`ℹ️ Accounting: Saltando actualización de ingreso para venta ${data.saleNumber} (ya procesada en transacción)`);
+      return;
+    }
     console.log(`💰 Accounting recibió venta: ${data.saleNumber}`);
     
     // Obtener último saldo para movimiento de caja

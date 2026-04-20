@@ -4,12 +4,21 @@ import api from '../../../shared/services/api';
 import Button from '../../core/components/UI/Button';
 import Card from '../../core/components/UI/Card';
 import Input from '../../core/components/UI/Input';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
+import ConfirmModal from '../../core/components/UI/ConfirmModal';
+import { TableSkeleton } from '../../core/components/UI/Skeleton';
 
 export default function EmployeesManager() {
+  const { notify } = useNotification();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  
+  // Estados para Confirmación
+  const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null });
+  const [deleting, setDeleting] = useState(false);
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -31,18 +40,19 @@ export default function EmployeesManager() {
     performCashClosing: false,
     viewCustomers: false
   });
-  const [message, setMessage] = useState('');
 
   useEffect(() => {
     loadEmployees();
   }, []);
 
   const loadEmployees = async () => {
+    setLoading(true);
     try {
       const { data } = await api.get('/employees');
       setEmployees(data);
     } catch (error) {
       console.error('Error:', error);
+      notify('Error al cargar empleados', 'error');
     } finally {
       setLoading(false);
     }
@@ -53,19 +63,18 @@ export default function EmployeesManager() {
     try {
       if (editing) {
         await api.put(`/employees/${editing._id}`, formData);
-        setMessage('✅ Empleado actualizado');
+        notify('Empleado actualizado correctamente', 'success');
       } else {
         await api.post('/employees', formData);
-        setMessage('✅ Empleado creado');
+        notify('Empleado registrado correctamente', 'success');
       }
       setShowForm(false);
       setEditing(null);
       resetForm();
       loadEmployees();
-      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error:', error);
-      setMessage(error.response?.data?.error || '❌ Error al guardar');
+      notify(error.response?.data?.error || 'Error al guardar empleado', 'error');
     }
   };
 
@@ -93,15 +102,17 @@ export default function EmployeesManager() {
     });
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar este empleado?')) return;
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
     try {
-      await api.delete(`/employees/${id}`);
-      setMessage('✅ Empleado eliminado');
+      await api.delete(`/employees/${confirmDelete.id}`);
+      notify('Empleado eliminado', 'success');
+      setConfirmDelete({ open: false, id: null });
       loadEmployees();
-      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
-      setMessage('❌ Error al eliminar');
+      notify('Error al eliminar empleado', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -186,14 +197,6 @@ export default function EmployeesManager() {
     }
   ];
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -218,19 +221,17 @@ export default function EmployeesManager() {
         </Button>
       </div>
 
-      {message && (
-        <div className={`p-4 rounded-xl ${message.includes('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          {message}
-        </div>
-      )}
-
       {/* Formulario */}
       {showForm && (
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 animate-fade-in">
-          <h3 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2 border-b pb-4">
-            {editing ? '✏️ Editar Empleado' : '➕ Registrar Nuevo Personal'}
-          </h3>
-          <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="bg-white rounded-[2rem] shadow-2xl border border-gray-100 p-8 animate-scale-in">
+          <div className="flex justify-between items-center mb-8 border-b pb-4">
+            <h3 className="text-2xl font-black text-gray-800 tracking-tighter uppercase">
+              {editing ? '✏️ Editar Empleado' : '➕ Registrar Nuevo Personal'}
+            </h3>
+            <button onClick={() => setShowForm(false)} className="bg-gray-100 text-gray-400 hover:text-gray-800 p-2 rounded-xl transition-all">✕</button>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Input
                 label="Nombre completo"
@@ -259,13 +260,16 @@ export default function EmployeesManager() {
                 />
               )}
               <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 h-[64px]">
-                <input
-                  type="checkbox"
-                  id="isActive"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                  className="w-5 h-5 text-green-600 rounded-lg focus:ring-green-500"
-                />
+                <div className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="isActive"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                </div>
                 <label htmlFor="isActive" className="text-sm font-bold text-gray-700 cursor-pointer">
                   Empleado con acceso activo
                 </label>
@@ -274,19 +278,19 @@ export default function EmployeesManager() {
 
             {/* Permisos */}
             <div className="pt-4">
-              <h4 className="font-bold text-gray-700 mb-4 flex items-center gap-2 uppercase text-xs tracking-widest">
+              <h4 className="font-black text-gray-400 mb-6 flex items-center gap-2 uppercase text-xs tracking-widest">
                 🔒 Configuración de Permisos
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {permissionGroups.map(group => (
-                  <div key={group.title} className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
-                    <p className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                      <span className="text-xl">{group.icon}</span> {group.title}
+                  <div key={group.title} className="bg-gray-50 rounded-3xl p-6 border border-gray-100">
+                    <p className="font-bold text-gray-800 mb-6 flex items-center gap-2">
+                      <span className="text-2xl">{group.icon}</span> {group.title}
                     </p>
                     <div className="space-y-3">
                       {group.perms.map(perm => (
-                        <label key={perm.key} className="flex items-center justify-between group cursor-pointer hover:bg-white p-2 rounded-xl transition-all">
-                          <span className="text-sm text-gray-600 group-hover:text-green-700 transition-colors">{perm.label}</span>
+                        <label key={perm.key} className="flex items-center justify-between group cursor-pointer hover:bg-white p-3 rounded-2xl transition-all border border-transparent hover:border-gray-100">
+                          <span className="text-sm font-medium text-gray-600 group-hover:text-green-700 transition-colors">{perm.label}</span>
                           <div className="relative inline-flex items-center">
                             <input
                               type="checkbox"
@@ -305,10 +309,10 @@ export default function EmployeesManager() {
             </div>
 
             <div className="flex gap-3 pt-6 border-t">
-              <Button type="submit" variant="primary" className="flex-1 bg-green-600 h-12 text-lg shadow-lg">
+              <Button type="submit" variant="primary" className="flex-1 bg-green-600 h-14 text-lg font-bold shadow-xl">
                 {editing ? 'Guardar Cambios' : 'Registrar Empleado'}
               </Button>
-              <Button type="button" variant="ghost" onClick={() => setShowForm(false)} className="flex-1">
+              <Button type="button" variant="ghost" onClick={() => setShowForm(false)} className="flex-1 h-14 font-bold">
                 Cancelar
               </Button>
             </div>
@@ -317,58 +321,75 @@ export default function EmployeesManager() {
       )}
 
       {/* Tabla de empleados */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="p-4 text-left text-xs font-bold text-gray-500 uppercase">Empleado</th>
-                <th className="p-4 text-left text-xs font-bold text-gray-500 uppercase">Correo</th>
-                <th className="p-4 text-center text-xs font-bold text-gray-500 uppercase">Estado</th>
-                <th className="p-4 text-center text-xs font-bold text-gray-500 uppercase">Accesos Clave</th>
-                <th className="p-4 text-center text-xs font-bold text-gray-500 uppercase w-24">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {employees.map(emp => (
-                <tr key={emp._id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold">
-                        {emp.name.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-bold text-gray-900">{emp.name}</div>
-                        <div className="text-[10px] text-gray-400 font-mono uppercase">ID: {emp._id.slice(-8)}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-4 text-gray-600 text-sm">{emp.email}</td>
-                  <td className="p-4 text-center">
-                    <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest ${emp.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {emp.isActive !== false ? 'ACTIVO' : 'INACTIVO'}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="flex justify-center gap-2">
-                      {emp.usePOS && <span title="Punto de Venta" className="cursor-help">💰</span>}
-                      {emp.viewInventory && <span title="Inventario" className="cursor-help">📦</span>}
-                      {emp.performCashClosing && <span title="Cierre de Caja" className="cursor-help">🏁</span>}
-                      {emp.viewAccounting && <span title="Contabilidad" className="cursor-help">📊</span>}
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <div className="flex gap-1 justify-center">
-                      <button onClick={() => handleEdit(emp)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-all">✏️</button>
-                      <button onClick={() => handleDelete(emp._id)} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-all">🗑️</button>
-                    </div>
-                  </td>
+          {loading ? (
+            <div className="p-8">
+              <TableSkeleton rows={5} cols={5} />
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="p-6 text-left text-xs font-bold text-gray-400 uppercase tracking-widest">Empleado</th>
+                  <th className="p-6 text-left text-xs font-bold text-gray-400 uppercase tracking-widest">Correo</th>
+                  <th className="p-6 text-center text-xs font-bold text-gray-400 uppercase tracking-widest">Estado</th>
+                  <th className="p-6 text-center text-xs font-bold text-gray-400 uppercase tracking-widest">Accesos Clave</th>
+                  <th className="p-6 text-center text-xs font-bold text-gray-400 uppercase tracking-widest w-24">Acciones</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {employees.map(emp => (
+                  <tr key={emp._id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-green-100 text-green-700 flex items-center justify-center font-black text-xl shadow-sm">
+                          {emp.name.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="font-bold text-gray-900">{emp.name}</div>
+                          <div className="text-[10px] text-gray-400 font-mono uppercase">ID: {emp._id.slice(-8)}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-6 text-gray-600 text-sm font-medium">{emp.email}</td>
+                    <td className="p-6 text-center">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest ${emp.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {emp.isActive !== false ? 'ACTIVO' : 'INACTIVO'}
+                      </span>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex justify-center gap-3">
+                        {emp.usePOS && <span title="Punto de Venta" className="text-xl grayscale hover:grayscale-0 transition-all cursor-help">💰</span>}
+                        {emp.viewInventory && <span title="Inventario" className="text-xl grayscale hover:grayscale-0 transition-all cursor-help">📦</span>}
+                        {emp.performCashClosing && <span title="Cierre de Caja" className="text-xl grayscale hover:grayscale-0 transition-all cursor-help">🏁</span>}
+                        {emp.viewAccounting && <span title="Contabilidad" className="text-xl grayscale hover:grayscale-0 transition-all cursor-help">📊</span>}
+                      </div>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => handleEdit(emp)} className="p-3 text-blue-600 hover:bg-blue-50 rounded-2xl transition-all">✏️</button>
+                        <button onClick={() => setConfirmDelete({ open: true, id: emp._id })} className="p-3 text-red-600 hover:bg-red-50 rounded-2xl transition-all">🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={confirmDelete.open}
+        onClose={() => setConfirmDelete({ open: false, id: null })}
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+        title="¿Eliminar Empleado?"
+        message="Esta acción revocará todo acceso al sistema de forma inmediata."
+        confirmText="Sí, eliminar"
+        type="danger"
+      />
     </div>
   );
 }

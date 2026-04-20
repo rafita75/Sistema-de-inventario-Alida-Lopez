@@ -61,10 +61,30 @@ function PublicRoute({ children }) {
   }
   
   if (user) {
-    return <Navigate to="/admin" replace />;
+    // Si es gestión (admin/empleado), mandar al dashboard administrativo
+    if (user.role === 'admin' || user.role === 'employee' || user.role === 'superadmin') {
+      return <Navigate to="/admin" replace />;
+    }
+    // Si es cliente/usuario normal, mandar a home
+    return <Navigate to="/home" replace />;
   }
   
   return children;
+}
+
+// ============================================
+// COMPONENTE DE REDIRECCIÓN RAÍZ
+// ============================================
+function RootRedirect() {
+  const { user } = useAuth();
+  
+  if (!user) return <Navigate to="/login" replace />;
+  
+  if (user.role === 'admin' || user.role === 'employee' || user.role === 'superadmin') {
+    return <Navigate to="/admin" replace />;
+  }
+  
+  return <Navigate to="/home" replace />;
 }
 
 // ============================================
@@ -112,11 +132,11 @@ function App() {
           } 
         />
         
-        {/* Redirección raíz */}
-        <Route path="/" element={<Navigate to="/admin" replace />} />
+        {/* Redirección raíz inteligente */}
+        <Route path="/" element={<RootRedirect />} />
         
         {/* Home / Dashboard General */}
-        <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/home" element={<ProtectedRoute redirectTo="/login"><Home /></ProtectedRoute>} />
 
         {/* POS */}
         <Route 
@@ -160,7 +180,7 @@ function App() {
 
         {/* Perfil */}
         <Route 
-          path="/perfil" 
+          path="/profile" 
           element={
             <ProtectedRoute redirectTo="/login">
               <Profile />
@@ -179,7 +199,7 @@ function App() {
         />
 
         {/* 404 */}
-        <Route path="*" element={<Navigate to="/admin" replace />} />
+        <Route path="*" element={<RootRedirect />} />
       </Routes>
     </BrowserRouter>
   );

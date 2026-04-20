@@ -1,36 +1,35 @@
-// server/modules/pos/routes/pos.js
 const express = require("express");
 const mongoose = require('mongoose');
-const Product = mongoose.model('Product');
 const auth = require("../../login/middleware/auth");
+const { requirePermission } = require('../../../shared/middleware/permissions');
 const Sale = require('../models/Sale');
 const eventBus = require('../../../shared/events');
 const EVENTS = require('../../../shared/events.types');
+const { sendPushNotification } = require('../../../shared/push-notifications');
+const StockMovement = require('../../inventory/models/StockMovement');
+
+// Importar modelos necesarios
+const Income = require('../../accounting/models/Income');
+const CashMovement = require('../../accounting/models/CashMovement');
+const CustomerDebt = require('../../accounting/models/CustomerDebt');
+const Product = require('../../inventory/models/Product');
 
 const router = express.Router();
 
-function canUsePOS(req) {
-  if (req.user.role === 'admin') return true;
-  if (req.user.role === 'employee' && req.user.usePOS) return true;
-  return false;
-}
-
 // ============================================
-// BUSCAR PRODUCTO POR CÓDIGO DE BARRAS (incluye variantes)
+// BUSCAR PRODUCTO POR CÓDIGO DE BARRAS
 // ============================================
-router.get("/product/barcode/:code", auth, async (req, res) => {
+router.get("/product/barcode/:code", auth, requirePermission('usePOS'), async (req, res) => {
   try {
-    if (!canUsePOS(req)) {
-      return res.status(403).json({ error: "No autorizado" });
-    }
-
     const barcode = req.params.code;
     
+    // 1. Buscar en producto principal
     let product = await Product.findOne({
       barcode: barcode,
       isActive: true,
     }).populate("categoryId");
 
+    // 2. Si no está en principal, buscar en variantes
     if (!product) {
       product = await Product.findOne({
         "variants.barcode": barcode,
@@ -39,7 +38,6 @@ router.get("/product/barcode/:code", auth, async (req, res) => {
       
       if (product) {
         const variant = product.variants.find(v => v.barcode === barcode);
-        
         if (variant) {
           return res.json({
             _id: product._id,
@@ -48,263 +46,210 @@ router.get("/product/barcode/:code", auth, async (req, res) => {
             stock: variant.stock,
             sku: variant.sku,
             barcode: variant.barcode,
-            hasVariants: true,
-            isVariant: true,
             variantId: variant._id,
-            parentProductId: product._id,
-            parentProductName: product.name
+            isVariant: true,
+            parentProductId: product._id
           });
         }
       }
-    }
-
-    if (!product) {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
-    res.json({
-      _id: product._id,
-      name: product.name,
-      price: product.price,
-      stock: product.stock,
-      sku: product.sku,
-      barcode: product.barcode,
-      hasVariants: product.hasVariants || false,
-      variants: product.variants || [],
-      isVariant: false
-    });
+    res.json(product);
   } catch (error) {
-    console.error(error);
+    console.error("Error barcode search:", error);
     res.status(500).json({ error: "Error al buscar producto" });
   }
 });
 
 // ============================================
-// BUSCAR PRODUCTOS POR NOMBRE
+// BUSCAR PRODUCTOS (BÚSQUEDA PROFUNDA)
 // ============================================
-router.get("/products/search", auth, async (req, res) => {
+router.get("/search", auth, requirePermission('usePOS'), async (req, res) => {
   try {
-    if (!canUsePOS(req)) {
-      return res.status(403).json({ error: "No autorizado" });
-    }
+    const { query } = req.query;
+    if (!query || query.trim().length < 2) return res.json([]);
 
-    const { q, limit = 20 } = req.query;
-    const query = { isActive: true };
-
-    if (q) {
-      query.$or = [
-        { name: { $regex: q, $options: "i" } },
-        { sku: { $regex: q, $options: "i" } },
-        { barcode: { $regex: q, $options: "i" } }
-      ];
-    }
-
-    const products = await Product.find(query)
-      .limit(parseInt(limit))
-      .sort({ name: 1 });
-
-    const productsWithVariants = products.map(product => ({
-      _id: product._id,
-      name: product.name,
-      price: product.price || 0,
-      stock: product.stock || 0,
-      sku: product.sku || '',
-      barcode: product.barcode || '',
-      hasVariants: product.hasVariants || false,
-      variantsCount: product.variants?.length || 0,
-      variants: product.variants || []
+    const words = query.trim().split(/\s+/).filter(w => w.length > 0);
+    
+    // Búsqueda que debe coincidir con TODAS las palabras ingresadas (Intersección)
+    const searchConditions = words.map(word => ({
+      $or: [
+        { name: { $regex: word, $options: "i" } },
+        { sku: { $regex: word, $options: "i" } },
+        { barcode: { $regex: word, $options: "i" } },
+        { "variants.name": { $regex: word, $options: "i" } },
+        { "variants.sku": { $regex: word, $options: "i" } },
+        { "variants.barcode": { $regex: word, $options: "i" } }
+      ]
     }));
 
-    res.json(productsWithVariants);
+    const products = await Product.find({
+      $and: searchConditions,
+      isActive: true,
+    })
+      .limit(20)
+      .populate("categoryId")
+      .select('name price stock sku barcode hasVariants variants');
+
+    res.json(products);
   } catch (error) {
-    console.error("❌ Error en búsqueda POS:", error);
-    res.status(500).json({ error: "Error al buscar productos" });
+    console.error("Error POS search:", error);
+    res.status(500).json({ error: "Error en el servidor al buscar" });
   }
 });
 
 // ============================================
-// OBTENER VARIANTES DE UN PRODUCTO
+// OBTENER VARIANTES
 // ============================================
-router.get("/product/:productId/variants", auth, async (req, res) => {
+router.get("/variants/:productId", auth, requirePermission('usePOS'), async (req, res) => {
   try {
-    if (!canUsePOS(req)) {
-      return res.status(403).json({ error: "No autorizado" });
-    }
-
     const product = await Product.findById(req.params.productId);
-
-    if (!product) {
-      return res.status(404).json({ error: "Producto no encontrado" });
-    }
-
-    if (!product.hasVariants || !product.variants || product.variants.length === 0) {
-      return res.json({
-        hasVariants: false,
-        product: {
-          _id: product._id,
-          name: product.name,
-          price: product.price,
-          stock: product.stock,
-          sku: product.sku
-        },
-        variants: []
-      });
-    }
+    if (!product) return res.status(404).json({ error: "Producto no encontrado" });
 
     res.json({
-      hasVariants: true,
-      product: {
-        _id: product._id,
-        name: product.name,
-        sku: product.sku
-      },
-      variants: product.variants.map(v => ({
-        _id: v._id,
-        name: v.name,
-        price: v.price || product.price,
-        stock: v.stock,
-        sku: v.sku,
-        image: v.image
-      }))
+      hasVariants: product.hasVariants,
+      product: { _id: product._id, name: product.name, sku: product.sku },
+      variants: product.variants || []
     });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Error al obtener variantes" });
   }
 });
 
 // ============================================
-// REGISTRAR VENTA POS (REFACTORIZADO - SOLO EMITE EVENTOS)
+// REGISTRAR VENTA (TRANSACCIÓN COMPLETA)
 // ============================================
-router.post("/sale", auth, async (req, res) => {
+router.post("/sale", auth, requirePermission('usePOS'), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    if (!canUsePOS(req)) {
-      return res.status(403).json({ error: "No autorizado" });
-    }
+    const { items, clienteNombre, clienteTelefono, paymentMethod, esDeuda } = req.body;
 
-    const { items, clienteNombre, clienteTelefono, paymentMethod, total, esDeuda } = req.body;
+    if (!items || items.length === 0) throw new Error("Carrito vacío");
 
-    // 1. Validar stock antes de procesar (solo lectura, no modificación)
+    let calculatedTotal = 0;
+    const validatedItems = [];
+    const stockUpdates = [];
+
     for (const item of items) {
-      if (item.variantId) {
-        const product = await Product.findById(item.productId);
-        if (!product) {
-          return res.status(404).json({ error: `Producto no encontrado: ${item.name}` });
-        }
-        const variant = product.variants.id(item.variantId);
-        if (!variant) {
-          return res.status(404).json({ error: `Variante no encontrada: ${item.name}` });
-        }
-        if (variant.stock < item.quantity) {
-          return res.status(400).json({
-            error: `Stock insuficiente para "${item.name}". Disponible: ${variant.stock}`,
-          });
-        }
-      } else {
-        const product = await Product.findById(item.productId);
-        if (!product) {
-          return res.status(404).json({ error: `Producto no encontrado: ${item.name}` });
-        }
-        if (product.stock < item.quantity) {
-          return res.status(400).json({
-            error: `Stock insuficiente para "${product.name}". Disponible: ${product.stock}`,
-          });
-        }
-      }
-    }
+      if (item.quantity <= 0) throw new Error(`Cantidad inválida para ${item.name}`);
 
-    // 2. Crear la venta (modelo Sale)
-    const sale = new Sale({
-      items: items.map(item => ({
+      const product = await Product.findById(item.productId).session(session);
+      if (!product) throw new Error(`Producto no encontrado: ${item.name}`);
+
+      let price = product.price;
+      let sku = product.sku;
+      let name = product.name;
+      let previousStock, newStock;
+
+      if (item.variantId) {
+        const variant = product.variants.id(item.variantId);
+        if (!variant) throw new Error(`Variante no encontrada: ${name}`);
+        if (variant.price) price = variant.price;
+        sku = variant.sku;
+        name = `${product.name} - ${variant.name}`;
+        
+        if (variant.stock < item.quantity) throw new Error(`Sin stock para ${name}`);
+
+        previousStock = variant.stock;
+        newStock = previousStock - item.quantity;
+        variant.stock = newStock;
+        product.stock = product.variants.reduce((sum, v) => sum + v.stock, 0);
+      } else {
+        if (product.stock < item.quantity) throw new Error(`Sin stock para ${product.name}`);
+        previousStock = product.stock;
+        newStock = previousStock - item.quantity;
+        product.stock = newStock;
+      }
+
+      calculatedTotal += price * item.quantity;
+      validatedItems.push({
         productId: item.productId,
         variantId: item.variantId || null,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        sku: item.sku || ''
-      })),
-      subtotal: total,
-      total,
+        name, price, quantity: item.quantity, sku
+      });
+
+      await product.save({ session });
+
+      stockUpdates.push({
+        productId: product._id,
+        productName: name,
+        type: 'sale',
+        quantity: -item.quantity,
+        previousStock, newStock,
+        reason: `Venta POS - ${clienteNombre || 'Mostrador'}`,
+        userId: req.user.id
+      });
+    }
+
+    const sale = new Sale({
+      items: validatedItems,
+      subtotal: calculatedTotal,
+      total: calculatedTotal,
       paymentMethod,
       clienteNombre: clienteNombre || "Mostrador",
       clienteTelefono: clienteTelefono || "",
       createdBy: req.user.id
     });
     
-    await sale.save();
+    await sale.save({ session });
 
-    // 3. EMITIR EVENTO - Inventory y Accounting escucharán
-    await eventBus.emitAsync(EVENTS.SALE_CREATED, {
-      saleId: sale._id,
-      saleNumber: sale.saleNumber,
-      items: items.map(item => ({
-        productId: item.productId,
-        variantId: item.variantId,
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        sku: item.sku
-      })),
-      total,
-      paymentMethod,
-      clienteNombre: clienteNombre || "Mostrador",
-      clienteTelefono: clienteTelefono || "",
-      esDeuda: esDeuda === true,
-      createdBy: req.user.id,
-      createdAt: new Date()
-    });
-
-    // 4. Notificaciones (socket.io y Push)
-    try {
-      const sendNotification = req.app.get('sendNotification');
-      const User = mongoose.model('User');
-      const admins = await User.find({ role: 'admin' });
-      
-      const notification = {
-        id: sale._id,
-        type: 'sale',
-        title: esDeuda ? '📝 Nueva venta a crédito' : '💰 Nueva venta registrada',
-        body: `${sale.clienteNombre || 'Mostrador'} - Total: Q${sale.total.toLocaleString()}${esDeuda ? ' (Crédito)' : ''}`,
-        data: {
-          saleNumber: sale.saleNumber,
-          total: sale.total,
-          items: sale.items.length,
-          url: '/inventario'
-        },
-        timestamp: new Date()
-      };
-      
-      for (const admin of admins) {
-        // Notificación en tiempo real (Socket)
-        if (sendNotification) {
-          sendNotification(admin._id.toString(), notification);
-        }
-        
-        // ENVIAR PUSH REAL (Segundo plano)
-        sendPushNotification(admin._id.toString(), {
-          title: notification.title,
-          body: notification.body,
-          icon: '/logo1.png',
-          data: {
-            url: '/inventario'
-          }
-        }).catch(err => console.error('Error enviando push individual:', err.message));
-      }
-    } catch (notifError) {
-      console.error('⚠️ Error no crítico en sistema de notificaciones:', notifError.message);
-      // No lanzamos error, permitimos que la respuesta de éxito continúe
+    for (const move of stockUpdates) {
+      move.saleId = sale._id;
+      move.reason = `Venta #${sale.saleNumber}`;
+      await new StockMovement(move).save({ session });
     }
 
-    res.json({
-      success: true,
-      message: "Venta registrada correctamente",
-      saleNumber: sale.saleNumber,
-      total,
+    const income = new Income({
+      tipo: "venta_pos",
+      invoiceNumber: sale.saleNumber,
+      monto: calculatedTotal,
+      descripcion: `Venta POS #${sale.saleNumber}`,
+      items: validatedItems, 
+      metodo: paymentMethod,
+      clienteNombre: clienteNombre || "Cliente mostrador",
+      esDeuda: esDeuda === true,
+      status: esDeuda ? 'debt' : 'completed', 
+      creadoPor: req.user.id
+    });
+    await income.save({ session });
+
+    if (esDeuda) {
+      const debt = new CustomerDebt({
+        clienteNombre: clienteNombre || "Cliente sin nombre",
+        monto: calculatedTotal,
+        estado: 'pendiente',
+        notas: `Venta #${sale.saleNumber}`
+      });
+      await debt.save({ session });
+      income.notas = `Deuda: ${debt._id}`;
+      await income.save({ session });
+    } else {
+      const lastMovement = await CashMovement.findOne().sort({ fecha: -1 }).session(session);
+      const saldoAnterior = lastMovement ? lastMovement.saldoNuevo : 0;
+      await CashMovement.create([{
+        tipo: "ingreso", monto: calculatedTotal, descripcion: `Venta POS #${sale.saleNumber}`,
+        referenciaId: income._id, referenciaModelo: "Income",
+        saldoAnterior, saldoNuevo: saldoAnterior + calculatedTotal
+      }], { session });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    eventBus.emitAsync(EVENTS.SALE_CREATED, {
+      saleId: sale._id, saleNumber: sale.saleNumber, items: validatedItems,
+      total: calculatedTotal, skipInventoryUpdate: true, skipAccountingUpdate: true
     });
 
+    res.json({ success: true, saleNumber: sale.saleNumber, total: calculatedTotal });
+
   } catch (error) {
-    console.error("Error al registrar venta POS:", error);
-    res.status(500).json({ error: "Error al registrar venta" });
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ error: error.message || "Error al registrar venta" });
   }
 });
 

@@ -1,260 +1,170 @@
-// client/src/pages/Admin/CategoriesManager.jsx
-import { useState, useEffect } from 'react';
+// client/src/modules/admin/pages/CategoriesManager.jsx
+import React, { useState, useEffect } from 'react';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '../../../shared/services/categoryService';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
+import Card from '../../core/components/UI/Card';
+import { useNotification } from '../../../shared/contexts/NotificationContext';
+import ConfirmModal from '../../core/components/UI/ConfirmModal';
+import { TableSkeleton } from '../../core/components/UI/Skeleton';
 
 export default function CategoriesManager() {
+  const { notify } = useNotification();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
   const [formData, setFormData] = useState({ name: '', description: '' });
-  const [message, setMessage] = useState('');
+  
+  // Estados para Confirmación
+  const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null });
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    loadCategories();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
-  const loadCategories = async () => {
+  const loadData = async () => {
+    setLoading(true);
     try {
       const data = await getCategories();
       setCategories(data);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
+    } catch (error) { 
+      console.error(error);
+      notify('Error al cargar categorías', 'error');
+    } finally { 
+      setLoading(false); 
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editing) {
-        await updateCategory(editing._id, formData);
-        setMessage('✅ Categoría actualizada');
+      if (editingCategory) {
+        await updateCategory(editingCategory._id, formData);
+        notify('Categoría actualizada', 'success');
       } else {
         await createCategory(formData);
-        setMessage('✅ Categoría creada');
+        notify('Categoría creada', 'success');
       }
-      setShowForm(false);
-      setEditing(null);
+      setShowModal(false);
+      loadData();
+    } catch (error) {
+      notify(error.response?.data?.error || 'Error al guardar', 'error');
+    }
+  };
+
+  const openModal = (category = null) => {
+    if (category) {
+      setEditingCategory(category);
+      setFormData(category);
+    } else {
+      setEditingCategory(null);
       setFormData({ name: '', description: '' });
-      loadCategories();
-      setTimeout(() => setMessage(''), 3000);
-    } catch (error) {
-      setMessage('❌ Error: ' + (error.response?.data?.error || 'Error al guardar'));
     }
+    setShowModal(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar esta categoría?')) return;
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
     try {
-      await deleteCategory(id);
-      setMessage('✅ Categoría eliminada');
-      loadCategories();
-      setTimeout(() => setMessage(''), 3000);
+      await deleteCategory(confirmDelete.id);
+      notify('Categoría eliminada', 'success');
+      setConfirmDelete({ open: false, id: null });
+      loadData();
     } catch (error) {
-      setMessage('❌ Error al eliminar');
+      notify('Error al eliminar categoría', 'error');
+    } finally {
+      setDeleting(false);
     }
-  };
-
-  const handleEdit = (category) => {
-    setEditing(category);
-    setFormData({ name: category.name, description: category.description || '' });
-    setShowForm(true);
   };
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="h-8 w-48 bg-gray-200 rounded-lg animate-pulse" />
+          <div className="h-10 w-40 bg-gray-200 rounded-xl animate-pulse" />
+        </div>
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+          <TableSkeleton rows={5} cols={3} />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <span className="w-1 h-6 bg-green-600 rounded-full"></span>
-            🏷️ Categorías
-          </h2>
-          <p className="text-gray-500 text-sm mt-1">Gestiona las categorías de tus productos</p>
-        </div>
-        <Button 
-          variant="primary" 
-          onClick={() => {
-            setEditing(null);
-            setFormData({ name: '', description: '' });
-            setShowForm(true);
-          }}
-          className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
-        >
-          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-          Nueva Categoría
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <span className="w-1 h-6 bg-green-600 rounded-full"></span>
+          🏷️ Categorías
+        </h2>
+        <Button variant="primary" onClick={() => openModal()} className="bg-gradient-to-r from-green-600 to-green-700 shadow-md">
+          + Nueva Categoría
         </Button>
       </div>
 
-      {message && (
-        <div className={`p-4 rounded-xl ${message.includes('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          {message}
+      <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100">
+              <tr>
+                <th className="p-6">Nombre</th>
+                <th className="p-6">Descripción</th>
+                <th className="p-6 text-center w-32">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {categories.map(c => (
+                <tr key={c._id} className="hover:bg-gray-50/50 transition-colors">
+                  <td className="p-6 font-bold text-gray-800">{c.name}</td>
+                  <td className="p-6 text-gray-500 text-sm">{c.description || '—'}</td>
+                  <td className="p-6 text-center">
+                    <div className="flex justify-center gap-1">
+                      <button onClick={() => openModal(c)} className="p-3 text-blue-600 hover:bg-blue-50 rounded-2xl transition-all">✏️</button>
+                      <button onClick={() => setConfirmDelete({ open: true, id: c._id })} className="p-3 text-red-600 hover:bg-red-50 rounded-2xl transition-all">🗑️</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {categories.length === 0 && (
+                <tr><td colSpan="3" className="p-12 text-center text-gray-400">No hay categorías registradas</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {/* Formulario */}
-      {showForm && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 animate-fade-in">
-          <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="w-1 h-5 bg-green-600 rounded-full"></span>
-            {editing ? '✏️ Editar Categoría' : '➕ Nueva Categoría'}
-          </h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Nombre *"
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="Ej: Electrónicos, Ropa, Hogar"
-              required
-              icon="📛"
-            />
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Descripción (opcional)</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full p-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
-                rows="3"
-                placeholder="Describe la categoría..."
-              />
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <form onSubmit={handleSubmit} className="bg-white rounded-[2rem] max-w-md w-full p-8 space-y-6 shadow-2xl animate-scale-in">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-2xl font-black text-gray-800 tracking-tighter uppercase">
+                {editingCategory ? '✏️ Editar Categoría' : '➕ Nueva Categoría'}
+              </h3>
+              <button type="button" onClick={() => setShowModal(false)} className="bg-gray-100 text-gray-400 hover:text-gray-800 transition">✕</button>
             </div>
-            <div className="flex gap-3 pt-2">
-              <Button type="submit" variant="primary" className="bg-gradient-to-r from-green-600 to-green-700">
-                {editing ? 'Actualizar' : 'Crear'} Categoría
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditing(null);
-                }}
-              >
-                Cancelar
-              </Button>
+            
+            <Input label="Nombre de la Categoría" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required placeholder="Ej: Escritura" />
+            <Input label="Descripción" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Para qué sirve esta categoría..." />
+            
+            <div className="flex gap-3 pt-4 border-t">
+              <Button type="submit" variant="primary" className="flex-1 bg-green-600 h-14 text-lg font-bold shadow-xl">Guardar</Button>
+              <Button type="button" variant="ghost" onClick={() => setShowModal(false)} className="flex-1 h-14 font-bold">Cancelar</Button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Lista de categorías - Tarjetas en móvil */}
-      <div className="block lg:hidden space-y-3">
-        {categories.map((cat) => (
-          <div key={cat._id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-            <div className="flex justify-between items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-800">{cat.name}</span>
-                  <span className="text-xs text-gray-400 font-mono bg-gray-100 px-2 py-0.5 rounded-full">{cat.slug}</span>
-                </div>
-                {cat.description && (
-                  <p className="text-sm text-gray-500 mt-2">{cat.description}</p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleEdit(cat)}
-                  className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
-                  title="Editar"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => handleDelete(cat._id)}
-                  className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                  title="Eliminar"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-        {categories.length === 0 && (
-          <div className="text-center py-12 text-gray-500 bg-white rounded-2xl shadow-sm border border-gray-100">
-            No hay categorías creadas. Haz clic en "Nueva Categoría" para comenzar.
-          </div>
-        )}
-      </div>
-
-      {/* Tabla desktop */}
-      <div className="hidden lg:block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="p-4 text-left text-sm font-semibold text-gray-600">Nombre</th>
-                <th className="p-4 text-left text-sm font-semibold text-gray-600">Slug</th>
-                <th className="p-4 text-left text-sm font-semibold text-gray-600">Descripción</th>
-                <th className="p-4 text-center text-sm font-semibold text-gray-600">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {categories.map((cat) => (
-                <tr key={cat._id} className="hover:bg-gray-50 transition">
-                  <td className="p-4">
-                    <span className="font-medium text-gray-800">{cat.name}</span>
-                  </td>
-                  <td className="p-4">
-                    <span className="text-sm text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded-full">{cat.slug}</span>
-                  </td>
-                  <td className="p-4">
-                    <p className="text-sm text-gray-500 max-w-md">
-                      {cat.description || '—'}
-                    </p>
-                  </td>
-                  <td className="p-4 text-center">
-                    <div className="flex gap-2 justify-center">
-                      <button
-                        onClick={() => handleEdit(cat)}
-                        className="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
-                        title="Editar"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={() => handleDelete(cat._id)}
-                        className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                        title="Eliminar"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {categories.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            No hay categorías creadas. Haz clic en "Nueva Categoría" para comenzar.
-          </div>
-        )}
-      </div>
+      <ConfirmModal
+        isOpen={confirmDelete.open}
+        onClose={() => setConfirmDelete({ open: false, id: null })}
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+        title="¿Eliminar Categoría?"
+        message="Esta acción no afectará a los productos existentes, pero la categoría ya no podrá seleccionarse para nuevos productos."
+        confirmText="Sí, eliminar"
+        type="danger"
+      />
     </div>
   );
 }
