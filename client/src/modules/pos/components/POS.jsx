@@ -8,6 +8,7 @@ import { useAuth } from '../../login/contexts/AuthContext';
 import { Html5Qrcode } from 'html5-qrcode';
 import { useNotification } from '../../../shared/contexts/NotificationContext';
 import ConfirmModal from '../../core/components/UI/ConfirmModal';
+import { getSocket } from '../../../shared/services/socketService';
 
 export default function POS({ onClose, onSaleComplete }) {
   const { user } = useAuth();
@@ -21,24 +22,34 @@ export default function POS({ onClose, onSaleComplete }) {
   const [variants, setVariants] = useState([]);
   const [showVariantModal, setShowVariantModal] = useState(false);
   const [clienteNombre, setClienteNombre] = useState('');
-  const [clienteTelefono, setClienteTelefono] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('efectivo');
   const [isDebt, setIsDebt] = useState(false);
   
-  // Estados para Escáner
   const [showNativeScanner, setShowNativeScanner] = useState(false);
   const [showPairingQR, setShowPairingQR] = useState(false);
   const nativeScannerRef = useRef(null);
   
-  // Referencias para el bloqueo de escaneo
   const barcodeRef = useRef(null);
   const lastScannedCodeRef = useRef(null);
   const lastScanTimeRef = useRef(0);
-  
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
 
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  // Escuchar escaneos remotos desde el celular
+  useEffect(() => {
+    const socket = getSocket();
+    if (socket) {
+      const handleRemoteBarcode = (data) => {
+        if (data.barcode) {
+          submitBarcode(data.barcode);
+        }
+      };
+      socket.on('barcode-received', handleRemoteBarcode);
+      return () => socket.off('barcode-received', handleRemoteBarcode);
+    }
+  }, []);
 
   useEffect(() => {
     const searchProductsDebounced = setTimeout(async () => {
@@ -48,7 +59,6 @@ export default function POS({ onClose, onSaleComplete }) {
           const data = await searchProducts(searchTerm);
           setProducts(Array.isArray(data) ? data : []);
         } catch (error) {
-          console.error('Error buscando productos:', error);
           setProducts([]);
         } finally {
           setIsSearching(false);
@@ -61,6 +71,14 @@ export default function POS({ onClose, onSaleComplete }) {
     return () => clearTimeout(searchProductsDebounced);
   }, [searchTerm]);
 
+  const stopNativeScanner = async () => {
+    if (nativeScannerRef.current) {
+      try { await nativeScannerRef.current.stop(); } catch (err) { console.error(err); }
+      nativeScannerRef.current = null;
+    }
+    setShowNativeScanner(false);
+  };
+
   const startNativeScanner = async () => {
     setShowNativeScanner(true);
     setTimeout(async () => {
@@ -72,7 +90,6 @@ export default function POS({ onClose, onSaleComplete }) {
           { fps: 15, qrbox: { width: 250, height: 150 }, aspectRatio: 1.0 },
           (decodedText) => {
             submitBarcode(decodedText);
-            if (navigator.vibrate) navigator.vibrate(100);
           }
         );
       } catch (err) {
@@ -82,19 +99,11 @@ export default function POS({ onClose, onSaleComplete }) {
     }, 300);
   };
 
-  const stopNativeScanner = async () => {
-    if (nativeScannerRef.current) {
-      try { await nativeScannerRef.current.stop(); } catch (err) { console.error(err); }
-      nativeScannerRef.current = null;
-    }
-    setShowNativeScanner(false);
-  };
-
   const submitBarcode = async (code) => {
     if (!code.trim()) return;
 
-    // Lógica de bloqueo (Cooldown)
     const now = Date.now();
+    // Bloqueo de 3 segundos para el MISMO código
     if (lastScannedCodeRef.current === code && (now - lastScanTimeRef.current) < 3000) {
       return;
     }
@@ -104,6 +113,8 @@ export default function POS({ onClose, onSaleComplete }) {
 
     try {
       const product = await getProductByBarcode(code);
+      
+      // Solo vibra si el producto se encontró
       if (navigator.vibrate) navigator.vibrate(100);
 
       if (product.isVariant) {
@@ -132,9 +143,8 @@ export default function POS({ onClose, onSaleComplete }) {
       }
       setBarcodeInput('');
     } catch (error) {
-      console.error(error);
       setBarcodeInput('');
-      lastScannedCodeRef.current = null;
+      lastScannedCodeRef.current = null; // Permitir re-intento si falló la red
     }
   };
 
@@ -151,7 +161,7 @@ export default function POS({ onClose, onSaleComplete }) {
         setSelectedProduct(data.product);
         setVariants(data.variants);
         setShowVariantModal(true);
-      } catch (error) { notify('Error al cargar las variantes', 'error'); }
+      } catch (error) { notify('Error al cargar variantes', 'error'); }
     } else {
       addToCart({ productId: product._id, name: product.name, price: product.price, stock: product.stock, variantId: null });
     }
@@ -172,7 +182,7 @@ export default function POS({ onClose, onSaleComplete }) {
 
   const addToCart = (item) => {
     if (item.stock < 1) {
-      notify(`Stock insuficiente.`, 'warning');
+      notify(`Stock insuficiente`, 'warning');
       return;
     }
     setCart(prev => {
@@ -180,7 +190,7 @@ export default function POS({ onClose, onSaleComplete }) {
       const existing = prev.find(i => i.itemKey === itemKey);
       if (existing) {
         if (existing.quantity + 1 > item.stock) {
-          notify(`Solo puedes agregar hasta ${item.stock} unidades.`, 'warning');
+          notify(`Máximo disponible alcanzado`, 'warning');
           return prev;
         }
         return prev.map(i => i.itemKey === itemKey ? { ...i, quantity: i.quantity + 1 } : i);
@@ -194,7 +204,7 @@ export default function POS({ onClose, onSaleComplete }) {
   const updateQuantity = (itemKey, quantity) => {
     const item = cart.find(i => i.itemKey === itemKey);
     if (quantity > (item?.stock || 0)) {
-      notify(`Solo hay ${item.stock} unidades disponibles.`, 'warning');
+      notify(`Solo hay ${item.stock} disponibles`, 'warning');
       return;
     }
     if (quantity <= 0) { removeFromCart(itemKey); return; }
@@ -204,9 +214,8 @@ export default function POS({ onClose, onSaleComplete }) {
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
   const handleCheckout = async () => {
-    if (cart.length === 0) return notify('Agrega productos al carrito', 'warning');
-    if (isDebt && !clienteNombre.trim()) return notify('Ingresa el nombre del cliente', 'warning');
-
+    if (cart.length === 0) return notify('Carrito vacío', 'warning');
+    if (isDebt && !clienteNombre.trim()) return notify('Ingresa nombre del cliente', 'warning');
     setLoading(true);
     try {
       const saleData = {
@@ -218,11 +227,10 @@ export default function POS({ onClose, onSaleComplete }) {
       if (onSaleComplete) onSaleComplete();
       setCart([]); setClienteNombre(''); onClose();
     } catch (error) {
-      notify(error.response?.data?.error || 'Error al procesar la venta', 'error');
+      notify('Error al procesar venta', 'error');
     } finally { setLoading(false); }
   };
 
-  // Componente de Item del Carrito
   const CartItem = ({ item }) => (
     <div className="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
       <div className="flex-1 min-w-0">
@@ -234,16 +242,14 @@ export default function POS({ onClose, onSaleComplete }) {
         <span className="w-4 text-center font-black text-[10px] text-gray-800">{item.quantity}</span>
         <button onClick={() => updateQuantity(item.itemKey, item.quantity + 1)} className="w-6 h-6 flex items-center justify-center font-black text-gray-400 hover:text-green-600">+</button>
       </div>
-      <div className="text-right min-w-[60px]">
-        <p className="font-black text-gray-900 text-xs">Q{(item.price * item.quantity).toLocaleString()}</p>
-      </div>
+      <div className="text-right min-w-[60px]"><p className="font-black text-gray-900 text-xs">Q{(item.price * item.quantity).toLocaleString()}</p></div>
       <button onClick={() => removeFromCart(item.itemKey)} className="text-gray-300 hover:text-red-500 transition-colors p-1">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
       </button>
     </div>
   );
 
-  const mScannerUrl = `${window.location.origin}/scanner?user=${user?.id || user?._id}`;
+  const mobileScannerUrl = `${window.location.origin}/scanner?user=${user?.id || user?._id}`;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
@@ -269,7 +275,6 @@ export default function POS({ onClose, onSaleComplete }) {
           <div className="p-4 flex-1 overflow-y-auto scrollbar-hide">
             <div className="flex flex-col gap-6 max-w-lg mx-auto pb-10">
               <div className="bg-gray-50 p-5 rounded-[2rem] border border-gray-100 shadow-inner text-center">
-                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Lector de Códigos</h3>
                 <form onSubmit={handleBarcodeSubmit} className="space-y-4">
                   <div className="relative group">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400 group-focus-within:text-green-600 transition-colors"><span className="text-xl">📷</span></div>
@@ -394,7 +399,7 @@ export default function POS({ onClose, onSaleComplete }) {
             <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner">📱</div>
             <h3 className="text-2xl font-black text-gray-800 mb-2 tracking-tighter uppercase">Escáner Remoto</h3>
             <p className="text-gray-500 mb-8 text-xs leading-relaxed font-medium">Escanea este código para conectar tu celular.</p>
-            <div className="bg-gray-50 p-6 rounded-3xl inline-block border-2 border-dashed border-gray-200 mb-8 shadow-inner"><QRCodeSVG value={mScannerUrl} size={180} level="H" includeMargin={false} /></div>
+            <div className="bg-gray-50 p-6 rounded-3xl inline-block border-2 border-dashed border-gray-200 mb-8 shadow-inner"><QRCodeSVG value={mobileScannerUrl} size={180} level="H" includeMargin={false} /></div>
             <div className="space-y-3">
               <div className="p-3 bg-blue-50 rounded-2xl text-blue-700 text-[10px] font-bold border border-blue-100 italic tracking-tighter">Asegúrate de estar en la misma red Wi-Fi</div>
               <Button variant="ghost" onClick={() => setShowPairingQR(false)} className="w-full h-12 rounded-2xl font-bold">Cerrar</Button>
