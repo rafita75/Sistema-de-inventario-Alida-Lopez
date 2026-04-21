@@ -7,15 +7,31 @@ const { requireAdmin } = require('../../../shared/middleware/permissions');
 const router = express.Router();
 
 // ============================================
-// OBTENER TODOS LOS EMPLEADOS
+// OBTENER TODOS LOS EMPLEADOS (PAGINADO)
 // ============================================
 router.get('/', auth, requireAdmin, async (req, res) => {
   try {
-    const employees = await User.find({ 
-      role: 'employee'
-    }).select('-password').sort({ createdAt: -1 });
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [employees, total] = await Promise.all([
+      User.find({ role: 'employee' })
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      User.countDocuments({ role: 'employee' })
+    ]);
     
-    res.json(employees);
+    res.json({
+      employees,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al obtener empleados' });

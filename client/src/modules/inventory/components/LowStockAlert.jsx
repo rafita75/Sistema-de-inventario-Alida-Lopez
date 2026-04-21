@@ -27,9 +27,10 @@ export default function LowStockAlert() {
         getLowStockProducts(),
         getLowStockVariants()
       ]);
-      const filteredProducts = productsData.filter(p => !p.hasVariants);
-      setProducts(filteredProducts);
-      setVariants(variantsData);
+      // Filtramos para que en 'products' solo queden los productos únicos (sin variantes)
+      const uniqueProducts = (productsData || []).filter(p => !p.hasVariants);
+      setProducts(uniqueProducts);
+      setVariants(variantsData || []);
     } catch (error) {
       console.error('Error cargando stock bajo:', error);
     } finally {
@@ -72,7 +73,7 @@ export default function LowStockAlert() {
 
   if (loading) return <div className="p-10 text-center animate-pulse text-gray-400">Analizando inventario...</div>;
 
-  const totalAlerts = products.length + variants.length;
+  const totalAlerts = (products?.length || 0) + (variants?.length || 0);
   if (totalAlerts === 0) return null;
 
   return (
@@ -80,7 +81,7 @@ export default function LowStockAlert() {
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
         <h3 className="text-lg font-black text-gray-800 mb-6 flex items-center gap-2 uppercase tracking-tighter">
           <span className="w-1.5 h-6 bg-orange-500 rounded-full"></span>
-          ⚠️ Alertar de Stock Bajo ({totalAlerts})
+          ⚠️ Alertas de Stock Bajo ({totalAlerts})
         </h3>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -113,7 +114,6 @@ export default function LowStockAlert() {
         </div>
       </div>
 
-      {/* Modal Idéntico al Manager */}
       {selectedItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl animate-scale-in">

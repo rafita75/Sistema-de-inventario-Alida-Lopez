@@ -54,13 +54,13 @@ export default function InventorySummary() {
       borderColor: 'border-purple-100'
     },
     { 
-      label: 'Stock bajo', 
-      value: (summary?.lowStockProducts || 0) + lowStockVariantsCount, 
+      label: 'Stock Crítico', 
+      value: (summary?.lowStockProducts || 0) + (summary?.lowStockVariants || 0) + (summary?.outOfStock || 0), 
       icon: '⚠️', 
-      bgColor: 'bg-yellow-50', 
-      textColor: 'text-yellow-600',
-      borderColor: 'border-yellow-100',
-      subtitle: `${summary?.lowStockProducts || 0} productos · ${lowStockVariantsCount} variantes`
+      bgColor: 'bg-red-50', 
+      textColor: 'text-red-600',
+      borderColor: 'border-red-100',
+      subtitle: `${summary?.outOfStock || 0} agotados · ${(summary?.lowStockProducts || 0) + (summary?.lowStockVariants || 0)} bajos`
     },
     { 
       label: 'Valor inventario', 

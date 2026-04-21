@@ -34,12 +34,21 @@ router.get('/low-stock', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
     
-    const products = await Product.find({
-      hasVariants: { $ne: true },
-      $expr: { $lt: ['$stock', { $ifNull: ['$minStock', 5] }] }
-    }).populate('categoryId');
+    // Obtenemos todos los productos activos
+    const allProducts = await Product.find({ isActive: true }).populate('categoryId');
     
-    res.json(products);
+    // Filtramos manualmente para incluir lógica de variantes
+    const lowStockItems = allProducts.filter(p => {
+      if (p.hasVariants) {
+        // Si tiene variantes, vemos si al menos una está baja de stock
+        return p.variants.some(v => v.stock <= (v.minStock || p.minStock || 5));
+      } else {
+        // Si es producto simple
+        return p.stock <= (p.minStock || 5);
+      }
+    });
+    
+    res.json(lowStockItems);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al obtener productos con stock bajo' });
@@ -170,39 +179,6 @@ router.get('/movements', auth, async (req, res) => {
   }
 });
 
-router.put('/products/:id/min-stock', auth, async (req, res) => {
-  try {
-    if (!canAdjustStock(req)) {
-      return res.status(403).json({ error: 'No tienes permiso para ajustar stock' });
-    }
-    
-    const { minStock } = req.body;
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      { minStock },
-      { new: true }
-    );
-    
-    if (!product) {
-      return res.status(404).json({ error: 'Producto no encontrado' });
-    }
-    
-    res.json(product);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al actualizar stock mínimo' });
-  }
-});
-
-// ============================================
-// ELIMINADO: router.get('/sales') - Ya no depende de Sale
-// ============================================
-// Los endpoints que usaban Sale han sido eliminados
-// La información de ventas ahora se obtiene desde Accounting
-
-// ============================================
-// RUTAS DE VENTAS (obtenidas desde Accounting para consistencia)
-// ============================================
 router.get('/sales', auth, async (req, res) => {
   try {
     if (!canViewInventory(req)) {
@@ -212,7 +188,6 @@ router.get('/sales', auth, async (req, res) => {
     const { limit = 50 } = req.query;
     const Income = mongoose.model('Income');
     
-    // Obtenemos solo ingresos de tipo venta_pos que tengan items
     const sales = await Income.find({ 
       tipo: 'venta_pos',
       items: { $exists: true, $not: { $size: 0 } }
@@ -225,36 +200,6 @@ router.get('/sales', auth, async (req, res) => {
   } catch (error) {
     console.error('Error al obtener ventas de inventario:', error);
     res.status(500).json({ error: 'Error al obtener datos de ventas' });
-  }
-});
-
-router.get('/movements/filtered', auth, async (req, res) => {
-  try {
-    if (!canViewInventory(req)) {
-      return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
-    }
-    
-    const { startDate, endDate, type, productId, limit = 50 } = req.query;
-    const query = {};
-    
-    if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
-    }
-    
-    if (type) query.type = type;
-    if (productId) query.productId = productId;
-    
-    const movements = await StockMovement.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .populate('userId', 'name');
-    
-    res.json(movements);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al obtener movimientos' });
   }
 });
 
@@ -336,7 +281,6 @@ router.put('/variants/:productId/:variantId/stock', auth, async (req, res) => {
     });
     await movement.save();
     
-    // 👈 EMITIR EVENTO para gasto
     if (quantity > 0 && purchasePrice && purchasePrice > 0) {
       await eventBus.emitAsync(EVENTS.EXPENSE_CREATED, {
         monto: quantity * purchasePrice,

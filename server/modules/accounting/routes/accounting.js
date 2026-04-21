@@ -1,10 +1,12 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Income = require('../models/Income');
 const Expense = require('../models/Expense');
 const CustomerDebt = require('../models/CustomerDebt');
 const BusinessDebt = require('../models/BusinessDebt');
 const CashMovement = require('../models/CashMovement');
 const CashClosing = require('../models/CashClosing');
+const Product = require('../../inventory/models/Product');
 const auth = require('../../login/middleware/auth');
 const { requirePermission } = require('../../../shared/middleware/permissions');
 
@@ -228,24 +230,42 @@ router.get('/balance-general', auth, requirePermission('viewAccounting'), async 
 router.get('/dashboard-stats', auth, requirePermission('viewAccounting'), async (req, res) => {
   try {
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const Product = mongoose.model('Product');
 
-    const [statsHoy, statsDeudas] = await Promise.all([
+    const [statsHoy, statsDeudas, products] = await Promise.all([
       Income.aggregate([
-        { $match: { fecha: { $gte: hoy }, esDeuda: false } }, 
+        { $match: { fecha: { $gte: hoy }, esDeuda: false, status: 'completed' } }, 
         { $group: { _id: null, total: { $sum: "$monto" }, count: { $sum: 1 } } }
       ]),
       CustomerDebt.aggregate([
         { $match: { estado: 'pendiente' } }, 
         { $group: { _id: null, total: { $sum: "$monto" } } }
-      ])
+      ]),
+      Product.find({ isActive: true })
     ]);
+
+    let productosBajoStock = 0;
+    products.forEach(p => {
+      if (p.hasVariants) {
+        const lowVariants = p.variants.filter(v => v.stock <= (v.minStock || p.minStock || 5));
+        productosBajoStock += lowVariants.length;
+      } else {
+        if (p.stock <= (p.minStock || 5)) {
+          productosBajoStock++;
+        }
+      }
+    });
 
     res.json({
       ventasHoy: statsHoy[0]?.count || 0,
       ingresosHoy: statsHoy[0]?.total || 0,
-      deudasPendientes: statsDeudas[0]?.total || 0
+      deudasPendientes: statsDeudas[0]?.total || 0,
+      productosBajoStock
     });
-  } catch (error) { res.status(500).json({ error: 'Error stats' }); }
+  } catch (error) { 
+    console.error(error);
+    res.status(500).json({ error: 'Error stats' }); 
+  }
 });
 
 router.get('/report', auth, requirePermission('viewAccounting'), async (req, res) => {
@@ -357,14 +377,30 @@ router.get('/dashboard', auth, requirePermission('viewAccounting'), async (req, 
   } catch (error) { res.status(500).json({ error: 'Error dashboard' }); }
 });
 
-router.get('/incomes', auth, requirePermission('viewAccounting'), async (req, res) => {
+router.get('/incomes', auth, (req, res, next) => {
+  const { role, permissions } = req.user;
+  if (role === 'admin' || (permissions && (permissions.includes('viewAccounting') || permissions.includes('usePOS')))) {
+    return next();
+  }
+  return res.status(403).json({ error: 'No tienes permiso para ver ingresos' });
+}, async (req, res) => {
   try {
-    const { fechaInicio, fechaFin } = req.query;
+    const { fechaInicio, fechaFin, page = 1, limit = 20 } = req.query;
     const query = {};
     if (fechaInicio) query.fecha = { $gte: new Date(fechaInicio) };
     if (fechaFin) query.fecha = { ...query.fecha, $lte: new Date(fechaFin) };
-    const incomes = await Income.find(query).sort({ fecha: -1 });
-    res.json(incomes);
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [incomes, total] = await Promise.all([
+      Income.find(query)
+        .sort({ fecha: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Income.countDocuments(query)
+    ]);
+
+    res.json(incomes); // El frontend espera el array directo en POSDashboard
   } catch (error) { res.status(500).json({ error: 'Error incomes' }); }
 });
 
@@ -379,7 +415,13 @@ router.get('/expenses', auth, requirePermission('viewAccounting'), async (req, r
   } catch (error) { res.status(500).json({ error: 'Error expenses' }); }
 });
 
-router.get('/customer-debts', auth, requirePermission('viewAccounting'), async (req, res) => {
+router.get('/customer-debts', auth, (req, res, next) => {
+  const { role, permissions } = req.user;
+  if (role === 'admin' || (permissions && (permissions.includes('viewAccounting') || permissions.includes('usePOS')))) {
+    return next();
+  }
+  return res.status(403).json({ error: 'No tienes permiso para ver deudas' });
+}, async (req, res) => {
   try {
     const debts = await CustomerDebt.find({ estado: 'pendiente' }).sort({ fecha: -1 });
     res.json(debts);

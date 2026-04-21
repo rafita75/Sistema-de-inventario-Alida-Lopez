@@ -48,8 +48,8 @@ export default function ProductForm({ product, categories, onSuccess, onCancel }
   const loadReferences = async () => {
     try {
       const [bData, sData] = await Promise.all([getBrands(), getSuppliers()]);
-      setBrands(bData);
-      setSuppliers(sData);
+      setBrands(bData.brands || bData);
+      setSuppliers(sData.suppliers || sData);
     } catch (e) { console.error('Error cargando referencias:', e); }
   };
 

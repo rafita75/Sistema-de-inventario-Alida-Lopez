@@ -14,8 +14,8 @@ const router = express.Router();
 
 router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
   try {
-    const { page = 1, limit = 20, search = '' } = req.query;
-    const query = {};
+    const { page = 1, limit = 20, search = '', brand, supplier, stockStatus } = req.query;
+    const query = { isActive: true };
     
     if (search) {
       query.$or = [
@@ -24,6 +24,50 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
         { barcode: { $regex: search, $options: 'i' } },
         { "variants.sku": { $regex: search, $options: 'i' } },
         { "variants.barcode": { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (brand) query.brandId = brand;
+    if (supplier) query.supplierId = supplier;
+
+    if (stockStatus === 'low') {
+      query.$or = [
+        { 
+          hasVariants: false, 
+          $expr: { $lte: ["$stock", { $ifNull: ["$minStock", 5] }] },
+          stock: { $gt: 0 }
+        },
+        {
+          hasVariants: true,
+          "variants.stock": { $gt: 0 },
+          $expr: {
+            $gt: [
+              {
+                $size: {
+                  $filter: {
+                    input: "$variants",
+                    as: "v",
+                    cond: {
+                      $and: [
+                        { $gt: ["$$v.stock", 0] },
+                        { $lte: ["$$v.stock", { $ifNull: ["$$v.minStock", { $ifNull: ["$minStock", 5] }] }] }
+                      ]
+                    }
+                  }
+                }
+              },
+              0
+            ]
+          }
+        }
+      ];
+    } else if (stockStatus === 'empty') {
+      query.$or = [
+        { hasVariants: false, stock: { $lte: 0 } },
+        { 
+          hasVariants: true, 
+          variants: { $elemMatch: { stock: { $lte: 0 } } } 
+        }
       ];
     }
     
@@ -79,7 +123,6 @@ router.post('/', auth, requirePermission('createProducts'), validateProduct, asy
       newValue: product
     });
     
-    // Si se ingresa stock inicial con precio de compra, registrar gasto
     if (product.purchasePrice && product.purchasePrice > 0 && product.stock > 0) {
       const Expense = require('../../accounting/models/Expense');
       const expense = new Expense({
