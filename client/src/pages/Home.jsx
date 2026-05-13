@@ -1,5 +1,4 @@
 // client/src/pages/Home.jsx
-import { useState, useEffect } from 'react';
 import { useAuth } from '../modules/login/contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import MainHeader from '../modules/core/components/Layout/MainHeader';
@@ -8,7 +7,6 @@ import Button from '../modules/core/components/UI/Button';
 
 export default function Home() {
   const { user, logout } = useAuth();
-  const [loading, setLoading] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -41,7 +39,7 @@ export default function Home() {
                 Accede a las herramientas de inventario, POS y contabilidad según tus permisos.
               </p>
               
-              {user?.role === 'admin' || user?.role === 'employee' ? (
+              {user?.role === 'admin' || user?.role === 'employee' || user?.role === 'superadmin' ? (
                 <Link to="/admin" className="w-full">
                   <Button className="w-full bg-green-600 hover:bg-green-700 text-lg py-6 rounded-2xl shadow-lg shadow-green-200">
                     Ir al Dashboard

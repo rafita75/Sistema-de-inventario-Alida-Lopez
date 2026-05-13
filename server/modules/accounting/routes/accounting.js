@@ -43,6 +43,26 @@ async function updateCash(tipo, monto, descripcion, referenciaId, referenciaMode
   return movement;
 }
 
+function canManageCollections(req) {
+  return Boolean(
+    req.user &&
+    (
+      req.user.role === 'admin' ||
+      req.user.role === 'superadmin' ||
+      req.user.viewAccounting === true ||
+      req.user.usePOS === true
+    )
+  );
+}
+
+function requireCollectionsAccess(req, res, next) {
+  if (canManageCollections(req)) {
+    return next();
+  }
+
+  return res.status(403).json({ error: 'No tienes permiso para gestionar cobros y deudas' });
+}
+
 // ============================================
 // RUTAS OPERATIVAS (ESCRITURA)
 // ============================================
@@ -89,7 +109,7 @@ router.post('/expense', auth, requirePermission('viewAccounting'), async (req, r
   }
 });
 
-router.put('/customer-debt/:id/pay', auth, requirePermission('viewAccounting'), async (req, res) => {
+router.put('/customer-debt/:id/pay', auth, requireCollectionsAccess, async (req, res) => {
   try {
     const debt = await CustomerDebt.findById(req.params.id);
     if (!debt || debt.estado === 'pagado') return res.status(400).json({ error: 'Deuda no válida' });
@@ -100,8 +120,10 @@ router.put('/customer-debt/:id/pay', auth, requirePermission('viewAccounting'), 
 
     const originalInvoice = await Income.findOne({ notas: new RegExp(debt._id.toString()) });
     if (originalInvoice) {
-      originalInvoice.status = 'completed';
-      originalInvoice.metodo = req.body.metodo || 'efectivo';
+      originalInvoice.status = 'collected';
+      originalInvoice.notas = [originalInvoice.notas, `Pagada: ${debt.fechaPago.toISOString()}`]
+        .filter(Boolean)
+        .join(' | ');
       await originalInvoice.save();
     }
 
@@ -109,6 +131,8 @@ router.put('/customer-debt/:id/pay', auth, requirePermission('viewAccounting'), 
       tipo: 'manual',
       monto: debt.monto,
       descripcion: `Cobro de deuda: ${debt.clienteNombre}`,
+      metodo: req.body.metodo || 'efectivo',
+      clienteNombre: debt.clienteNombre,
       creadoPor: req.user.id
     });
     await incomeRecord.save();
@@ -377,30 +401,41 @@ router.get('/dashboard', auth, requirePermission('viewAccounting'), async (req, 
   } catch (error) { res.status(500).json({ error: 'Error dashboard' }); }
 });
 
-router.get('/incomes', auth, (req, res, next) => {
-  const { role, permissions } = req.user;
-  if (role === 'admin' || (permissions && (permissions.includes('viewAccounting') || permissions.includes('usePOS')))) {
-    return next();
-  }
-  return res.status(403).json({ error: 'No tienes permiso para ver ingresos' });
-}, async (req, res) => {
+router.get('/incomes', auth, requireCollectionsAccess, async (req, res) => {
   try {
-    const { fechaInicio, fechaFin, page = 1, limit = 20 } = req.query;
+    const { fechaInicio, fechaFin, page, limit } = req.query;
     const query = {};
     if (fechaInicio) query.fecha = { $gte: new Date(fechaInicio) };
     if (fechaFin) query.fecha = { ...query.fecha, $lte: new Date(fechaFin) };
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const shouldPaginate = page !== undefined || limit !== undefined;
+
+    if (!shouldPaginate) {
+      const incomes = await Income.find(query).sort({ fecha: -1 });
+      return res.json(incomes);
+    }
+
+    const parsedPage = Math.max(parseInt(page, 10) || 1, 1);
+    const parsedLimit = Math.max(parseInt(limit, 10) || 20, 1);
+    const skip = (parsedPage - 1) * parsedLimit;
 
     const [incomes, total] = await Promise.all([
       Income.find(query)
         .sort({ fecha: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
+        .limit(parsedLimit),
       Income.countDocuments(query)
     ]);
 
-    res.json(incomes); // El frontend espera el array directo en POSDashboard
+    res.json({
+      incomes,
+      pagination: {
+        total,
+        page: parsedPage,
+        limit: parsedLimit,
+        pages: Math.ceil(total / parsedLimit)
+      }
+    });
   } catch (error) { res.status(500).json({ error: 'Error incomes' }); }
 });
 
@@ -415,13 +450,7 @@ router.get('/expenses', auth, requirePermission('viewAccounting'), async (req, r
   } catch (error) { res.status(500).json({ error: 'Error expenses' }); }
 });
 
-router.get('/customer-debts', auth, (req, res, next) => {
-  const { role, permissions } = req.user;
-  if (role === 'admin' || (permissions && (permissions.includes('viewAccounting') || permissions.includes('usePOS')))) {
-    return next();
-  }
-  return res.status(403).json({ error: 'No tienes permiso para ver deudas' });
-}, async (req, res) => {
+router.get('/customer-debts', auth, requireCollectionsAccess, async (req, res) => {
   try {
     const debts = await CustomerDebt.find({ estado: 'pendiente' }).sort({ fecha: -1 });
     res.json(debts);

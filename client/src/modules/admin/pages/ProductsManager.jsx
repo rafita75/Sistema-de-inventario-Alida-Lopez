@@ -32,9 +32,16 @@ export default function ProductsManager() {
   const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null, type: 'product', extra: null });
   const [deleting, setDeleting] = useState(false);
 
+  const openCreateModal = useCallback(() => {
+    setEditingProduct(null);
+    setShowModal(true);
+  }, []);
+
   useEffect(() => {
-    loadData();
-  }, [currentPage]); 
+    const handleOpenCreateModal = () => openCreateModal();
+    window.addEventListener('openCreateProductModal', handleOpenCreateModal);
+    return () => window.removeEventListener('openCreateProductModal', handleOpenCreateModal);
+  }, [openCreateModal]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -42,7 +49,7 @@ export default function ProductsManager() {
     loadData();
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [productsData, categoriesData] = await Promise.all([
@@ -65,7 +72,11 @@ export default function ProductsManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, notify, search]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]); 
 
   const handleConfirmDelete = async () => {
     setDeleting(true);
@@ -133,11 +144,6 @@ export default function ProductsManager() {
       ...prev,
       [productId]: !prev[productId]
     }));
-  };
-
-  const openCreateModal = () => {
-    setEditingProduct(null);
-    setShowModal(true);
   };
 
   const openEditModal = (product, e) => {

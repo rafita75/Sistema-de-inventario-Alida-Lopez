@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../../../shared/services/api';
 
 export default function AuditLogs() {
@@ -7,11 +7,7 @@ export default function AuditLogs() {
   const [pagination, setPagination] = useState({ page: 1, total: 0, pages: 1 });
   const [filters, setFilters] = useState({ module: '', action: '', search: '' });
 
-  useEffect(() => {
-    loadLogs();
-  }, [pagination.page, filters.module, filters.action]);
-
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     setLoading(true);
     try {
       const params = {
@@ -28,7 +24,11 @@ export default function AuditLogs() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters.action, filters.module, filters.search, pagination.page]);
+
+  useEffect(() => {
+    loadLogs();
+  }, [loadLogs]);
 
   const getActionColor = (action) => {
     switch (action) {

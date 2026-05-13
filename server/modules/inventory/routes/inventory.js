@@ -13,15 +13,56 @@ const router = express.Router();
 // FUNCIONES DE VERIFICACIÓN DE PERMISOS
 // ============================================
 function canViewInventory(req) {
-  if (req.user.role === 'admin') return true;
+  if (req.user.role === 'admin' || req.user.role === 'superadmin') return true;
   if (req.user.role === 'employee' && req.user.viewInventory) return true;
   return false;
 }
 
 function canAdjustStock(req) {
-  if (req.user.role === 'admin') return true;
+  if (req.user.role === 'admin' || req.user.role === 'superadmin') return true;
   if (req.user.role === 'employee' && req.user.adjustStock) return true;
   return false;
+}
+
+function buildMovementQuery(queryParams = {}) {
+  const query = {};
+
+  if (queryParams.productId) {
+    query.productId = queryParams.productId;
+  }
+
+  if (queryParams.type) {
+    query.type = queryParams.type;
+  }
+
+  if (queryParams.startDate || queryParams.endDate) {
+    query.createdAt = {};
+
+    if (queryParams.startDate) {
+      query.createdAt.$gte = new Date(queryParams.startDate);
+    }
+
+    if (queryParams.endDate) {
+      const endDate = new Date(queryParams.endDate);
+      endDate.setHours(23, 59, 59, 999);
+      query.createdAt.$lte = endDate;
+    }
+  }
+
+  return query;
+}
+
+async function listMovements(req, res) {
+  const { limit = 50 } = req.query;
+  const query = buildMovementQuery(req.query);
+
+  const movements = await StockMovement.find(query)
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit, 10))
+    .populate('userId', 'name')
+    .populate('saleId', 'saleNumber');
+
+  res.json(movements);
 }
 
 // ============================================
@@ -61,17 +102,32 @@ router.get('/summary', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
     
-    const totalProducts = await Product.countDocuments();
-    const productsWithVariants = await Product.find({ hasVariants: true });
+    const totalProducts = await Product.countDocuments({ isActive: true });
+    const productsWithVariants = await Product.find({ hasVariants: true, isActive: true });
     const totalVariants = productsWithVariants.reduce((sum, p) => sum + (p.variants?.length || 0), 0);
+    const lowStockVariants = productsWithVariants.reduce((sum, product) => (
+      sum + product.variants.filter((variant) => (
+        variant.stock > 0 && variant.stock <= (variant.minStock || product.minStock || 5)
+      )).length
+    ), 0);
+    const outOfStockVariants = productsWithVariants.reduce((sum, product) => (
+      sum + product.variants.filter((variant) => variant.stock === 0).length
+    ), 0);
     
     const lowStockProducts = await Product.countDocuments({
+      isActive: true,
       hasVariants: { $ne: true },
-      $expr: { $lt: ['$stock', { $ifNull: ['$minStock', 5] }] }
+      stock: { $gt: 0 },
+      $expr: { $lte: ['$stock', { $ifNull: ['$minStock', 5] }] }
     });
-    const outOfStock = await Product.countDocuments({ stock: 0 });
+    const outOfStock = await Product.countDocuments({
+      isActive: true,
+      hasVariants: { $ne: true },
+      stock: 0
+    });
     
     const totalValue = await Product.aggregate([
+      { $match: { isActive: true } },
       { $group: { _id: null, total: { $sum: { $multiply: ['$price', '$stock'] } } } }
     ]);
     
@@ -79,6 +135,8 @@ router.get('/summary', auth, async (req, res) => {
       totalProducts,
       totalVariants,
       lowStockProducts,
+      lowStockVariants,
+      outOfStockVariants,
       outOfStock,
       totalValue: totalValue[0]?.total || 0
     });
@@ -161,21 +219,24 @@ router.get('/movements', auth, async (req, res) => {
     if (!canViewInventory(req)) {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
-    
-    const { limit = 50, productId } = req.query;
-    const query = {};
-    
-    if (productId) query.productId = productId;
-    
-    const movements = await StockMovement.find(query)
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .populate('userId', 'name');
-    
-    res.json(movements);
+
+    await listMovements(req, res);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al obtener historial' });
+  }
+});
+
+router.get('/movements/filtered', auth, async (req, res) => {
+  try {
+    if (!canViewInventory(req)) {
+      return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
+    }
+
+    await listMovements(req, res);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al filtrar historial' });
   }
 });
 
@@ -209,7 +270,7 @@ router.get('/low-stock-variants', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
     
-    const products = await Product.find({ hasVariants: true });
+    const products = await Product.find({ hasVariants: true, isActive: true });
     const lowStockVariants = [];
     
     for (const product of products) {

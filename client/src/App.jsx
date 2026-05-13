@@ -3,21 +3,21 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './modules/login/contexts/AuthContext';
 
 import { initSocket, requestNotificationPermission, showNotification } from './shared/services/socketService';
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 
 // Core
-import Login from './modules/login/pages/Login';
-import Register from './modules/login/pages/Register';
-import Home from './pages/Home';
-import MobileScanner from './modules/pos/pages/MobileScanner';
+const Login = lazy(() => import('./modules/login/pages/Login'));
+const Register = lazy(() => import('./modules/login/pages/Register'));
+const Home = lazy(() => import('./pages/Home'));
+const MobileScanner = lazy(() => import('./modules/pos/pages/MobileScanner'));
 
 // Admin & Gestión
-import AdminDashboard from './modules/admin/pages/AdminDashboard';
-import POSDashboard from './modules/pos/pages/POSDashboard';
-import InventoryManager from './modules/inventory/pages/InventoryManager';
-import AccountingDashboard from './modules/accounting/pages/AccountingDashboard';
-import Profile from './modules/login/pages/Profile';
-import AuditLogs from './modules/admin/pages/AuditLogs';
+const AdminDashboard = lazy(() => import('./modules/admin/pages/AdminDashboard'));
+const POSDashboard = lazy(() => import('./modules/pos/pages/POSDashboard'));
+const InventoryManager = lazy(() => import('./modules/inventory/pages/InventoryManager'));
+const AccountingDashboard = lazy(() => import('./modules/accounting/pages/AccountingDashboard'));
+const Profile = lazy(() => import('./modules/login/pages/Profile'));
+const AuditLogs = lazy(() => import('./modules/admin/pages/AuditLogs'));
 
 // ============================================
 // CONSTANTES
@@ -26,6 +26,7 @@ import AuditLogs from './modules/admin/pages/AuditLogs';
 const ROLES = {
   ADMIN: 'admin',
   EMPLOYEE: 'employee',
+  SUPERADMIN: 'superadmin',
   USER: 'user'
 };
 
@@ -87,6 +88,10 @@ function RootRedirect() {
   return <Navigate to="/home" replace />;
 }
 
+function RouteLoader() {
+  return <div className="min-h-screen flex items-center justify-center">Cargando...</div>;
+}
+
 // ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
@@ -94,19 +99,21 @@ function App() {
   const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    if (user && (user.role === 'admin' || user.role === 'employee')) {
-      const userId = String(user.id || user._id);
-      const socket = initSocket(userId);
+    if (user && (user.role === ROLES.ADMIN || user.role === ROLES.EMPLOYEE || user.role === ROLES.SUPERADMIN)) {
+      const socket = initSocket();
       requestNotificationPermission();
       
       if (socket) {
-        socket.on('new-notification', (notification) => {
+        const handleNotification = (notification) => {
           showNotification(notification.title, {
             body: notification.body,
             icon: '/favicon.svg',
             data: notification.data
           });
-        });
+        };
+
+        socket.on('new-notification', handleNotification);
+        return () => socket.off('new-notification', handleNotification);
       }
     }
   }, [user]);
@@ -117,6 +124,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<RouteLoader />}>
       <Routes>
         {/* Rutas públicas */}
         <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
@@ -126,7 +134,7 @@ function App() {
         <Route 
           path="/scanner" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.SUPERADMIN]} redirectTo="/login">
               <MobileScanner />
             </ProtectedRoute>
           } 
@@ -142,7 +150,7 @@ function App() {
         <Route 
           path="/pos" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.SUPERADMIN]} redirectTo="/login">
               <POSDashboard />
             </ProtectedRoute>
           } 
@@ -152,7 +160,7 @@ function App() {
         <Route 
           path="/inventario" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.SUPERADMIN]} redirectTo="/login">
               <InventoryManager />
             </ProtectedRoute>
           } 
@@ -162,7 +170,7 @@ function App() {
         <Route 
           path="/contabilidad" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERADMIN]} redirectTo="/login">
               <AccountingDashboard />
             </ProtectedRoute>
           } 
@@ -172,7 +180,7 @@ function App() {
         <Route 
           path="/admin/auditoria" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERADMIN]} redirectTo="/login">
               <AuditLogs />
             </ProtectedRoute>
           } 
@@ -192,7 +200,7 @@ function App() {
         <Route 
           path="/admin" 
           element={
-            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE]} redirectTo="/login">
+            <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.SUPERADMIN]} redirectTo="/login">
               <AdminDashboard />
             </ProtectedRoute>
           } 
@@ -201,6 +209,7 @@ function App() {
         {/* 404 */}
         <Route path="*" element={<RootRedirect />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

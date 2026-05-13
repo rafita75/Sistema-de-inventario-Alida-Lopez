@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/CategoriesManager.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getCategories, createCategory, updateCategory, deleteCategory } from '../../../shared/services/categoryService';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
@@ -20,9 +20,7 @@ export default function CategoriesManager() {
   const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null });
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getCategories();
@@ -33,7 +31,9 @@ export default function CategoriesManager() {
     } finally { 
       setLoading(false); 
     }
-  };
+  }, [notify]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

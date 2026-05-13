@@ -14,69 +14,96 @@ export default function MobileScanner() {
   const [loadingProduct, setLoadingProduct] = useState(false);
   const [error, setError] = useState(null);
   const html5QrCodeRef = useRef(null);
-  
+
   // Referencias para control de duplicados
   const lastScannedCodeRef = useRef(null);
   const lastScannedTimeRef = useRef(0);
 
   useEffect(() => {
-    if (user?.id || user?._id) {
-      const uId = user.id || user._id;
-      const socket = initSocket(uId);
-      setStatus('Sincronizado con PC ✅');
+    if (!(user?.id || user?._id)) {
+      return;
     }
+
+    const socket = initSocket();
+    const handleConnect = () => {
+      setStatus('Sincronizado con PC');
+      setError(null);
+    };
+
+    const handleConnectError = () => {
+      setStatus('Error de conexion');
+      setError('No fue posible conectar este celular con la caja.');
+    };
+
+    const handleDisconnect = () => {
+      setStatus('Conexion perdida');
+    };
+
+    if (!socket) {
+      setStatus('Sesion no disponible');
+      setError('No se pudo abrir la sesion del escaner.');
+      return;
+    }
+
+    socket.on('connect', handleConnect);
+    socket.on('connect_error', handleConnectError);
+    socket.on('disconnect', handleDisconnect);
+    setStatus(socket.connected ? 'Sincronizado con PC' : 'Conectando con caja...');
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('connect_error', handleConnectError);
+      socket.off('disconnect', handleDisconnect);
+    };
   }, [user]);
 
   const startScanner = async () => {
     try {
       setError(null);
-      const html5QrCode = new Html5Qrcode("reader");
+      const html5QrCode = new Html5Qrcode('reader');
       html5QrCodeRef.current = html5QrCode;
 
       await html5QrCode.start(
-        { facingMode: "environment" }, 
-        { fps: 15, qrbox: { width: 280, height: 180 }, aspectRatio: 1.0 }, 
+        { facingMode: 'environment' },
+        { fps: 15, qrbox: { width: 280, height: 180 }, aspectRatio: 1.0 },
         (decodedText) => {
           const now = Date.now();
-          
-          // Bloqueo de 3 segundos para el MISMO código
+
+          // Bloqueo de 3 segundos para el mismo codigo
           if (decodedText === lastScannedCodeRef.current && (now - lastScannedTimeRef.current) < 3000) {
             return;
           }
 
           lastScannedCodeRef.current = decodedText;
           lastScannedTimeRef.current = now;
-          
+
           handleScanSuccess(decodedText);
         }
       );
       setIsScanning(true);
     } catch (err) {
-      setError("No se pudo acceder a la cámara.");
+      setError('No se pudo acceder a la camara.');
     }
   };
 
   const handleScanSuccess = async (barcode) => {
     setLastScanned(barcode);
     setLoadingProduct(true);
-    
+
     // 1. Enviar a PC al instante
     const socket = getSocket();
     if (socket?.connected) {
       socket.emit('send-barcode', { barcode });
     }
 
-    // 2. Consultar información para feedback visual
+    // 2. Consultar informacion para feedback visual
     try {
       const product = await getProductByBarcode(barcode);
       setProductInfo(product);
-      
-      // VIBRACIÓN: Solo si el producto es válido y se procesó
+
       if (navigator.vibrate) navigator.vibrate(100);
-      
     } catch (err) {
-      setProductInfo({ error: "Producto no encontrado" });
-      // Si no existe, no vibramos o vibramos diferente
+      setProductInfo({ error: 'Producto no encontrado' });
     } finally {
       setLoadingProduct(false);
     }
@@ -91,18 +118,26 @@ export default function MobileScanner() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col font-sans pb-10">
-      <div className="p-5 bg-gray-900/50 backdrop-blur-md border-b border-gray-800 flex justify-between items-center sticky top-0 z-50">
-        <div>
-          <h1 className="text-xl font-black text-green-500 tracking-tight italic">LIBRERÍA A&C</h1>
-          <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${isScanning ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`}></span>
-            <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">{status}</p>
+      <div className="p-5 bg-gray-900/50 backdrop-blur-md border-b border-gray-800 sticky top-0 z-50">
+        <div className="flex justify-between items-center gap-4">
+          <div>
+            <h1 className="text-xl font-black text-green-500 tracking-tight italic">LIBRERIA A&C</h1>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${isScanning ? 'bg-green-500 animate-pulse' : 'bg-gray-600'}`}></span>
+              <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest">{status}</p>
+            </div>
           </div>
+          {isScanning && (
+            <button onClick={stopScanner} className="bg-red-500/20 text-red-500 border border-red-500/30 px-5 py-2 rounded-2xl text-[10px] font-black active:scale-95 transition-all uppercase tracking-tighter">
+              Detener
+            </button>
+          )}
         </div>
-        {isScanning && (
-          <button onClick={stopScanner} className="bg-red-500/20 text-red-500 border border-red-500/30 px-5 py-2 rounded-2xl text-[10px] font-black active:scale-95 transition-all uppercase tracking-tighter">
-            Detener
-          </button>
+
+        {error && (
+          <div className="mt-4 rounded-[2rem] border border-red-500/20 bg-red-500/10 p-4 text-center text-sm font-bold text-red-300">
+            {error}
+          </div>
         )}
       </div>
 
@@ -114,8 +149,8 @@ export default function MobileScanner() {
               <div className="w-24 h-24 bg-green-500/10 rounded-[2rem] flex items-center justify-center mb-8 border border-green-500/20 shadow-inner">
                 <span className="text-5xl">📷</span>
               </div>
-              <h2 className="text-2xl font-black mb-3 tracking-tighter uppercase">Escáner Remoto</h2>
-              <p className="text-gray-500 text-xs mb-10 leading-relaxed font-medium">Los productos escaneados aparecerán <br/> automáticamente en tu pantalla de PC.</p>
+              <h2 className="text-2xl font-black mb-3 tracking-tighter uppercase">Escaner Remoto</h2>
+              <p className="text-gray-500 text-xs mb-10 leading-relaxed font-medium">Los productos escaneados apareceran <br /> automaticamente en tu pantalla de PC.</p>
               <button onClick={startScanner} className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-5 rounded-[2rem] shadow-2xl shadow-green-900/20 transition-all active:scale-95 text-lg tracking-tight">ACTIVAR LECTOR</button>
             </div>
           )}
@@ -151,7 +186,7 @@ export default function MobileScanner() {
                 <div className="p-8 text-gray-950">
                   <h3 className="text-2xl font-black leading-none mb-2 uppercase tracking-tighter">{productInfo.name}</h3>
                   <div className="flex gap-2">
-                    <span className="bg-gray-100 text-gray-600 text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-widest">✨ {productInfo.brandId?.name || 'GENÉRICO'}</span>
+                    <span className="bg-gray-100 text-gray-600 text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-widest">✨ {productInfo.brandId?.name || 'GENERICO'}</span>
                     <span className="bg-green-50 text-green-700 text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-widest">📦 STOCK: {productInfo.stock}</span>
                   </div>
                   <div className="flex items-baseline justify-between mt-8 pt-6 border-t border-gray-100">

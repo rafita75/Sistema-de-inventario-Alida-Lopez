@@ -1,5 +1,4 @@
-// server/scripts/seed_demo_data.js
-require("dotenv").config();
+require("dotenv").config({ path: __dirname + '/../.env' });
 const mongoose = require("mongoose");
 
 // Importar Modelos
@@ -15,24 +14,26 @@ const CashMovement = require("../modules/accounting/models/CashMovement");
 const CashClosing = require("../modules/accounting/models/CashClosing");
 const CustomerDebt = require("../modules/accounting/models/CustomerDebt");
 const BusinessDebt = require("../modules/accounting/models/BusinessDebt");
+const AuditLog = require("../modules/core/models/AuditLog");
 
-function generateSlug(name) {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
+// (Opcional) Si deseas borrar los usuarios también, descomenta las siguientes líneas:
+// const User = require("../modules/login/models/User");
 
-async function seedData() {
+async function cleanData() {
   try {
-    console.log("🔄 Conectando a MongoDB para limpieza y carga...");
+    if (!process.env.MONGO_URI) {
+      console.error("❌ Error: No se encontró MONGO_URI en el archivo .env");
+      process.exit(1);
+    }
+
+    console.log("🔄 Conectando a MongoDB para limpiar la base de datos...");
     await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ Conexión establecida.");
 
-    // 1. LIMPIEZA TOTAL
-    console.log("🧹 Limpiando base de datos...");
+    console.log("⚠️ ¡ADVERTENCIA! Estás a punto de vaciar la base de datos.");
+    console.log("🧹 Limpiando colecciones principales...");
+
+    // Se eliminan todos los documentos de las colecciones seleccionadas
     await Promise.all([
       Product.deleteMany({}),
       Category.deleteMany({}),
@@ -46,12 +47,21 @@ async function seedData() {
       CashClosing.deleteMany({}),
       CustomerDebt.deleteMany({}),
       BusinessDebt.deleteMany({}),
+      AuditLog.deleteMany({})
     ]);
-    console.log("✅ Sistema limpio de datos antiguos.");
+
+    // Si descomentaste la importación de User arriba, puedes borrar los usuarios así:
+    // console.log("🧹 Limpiando Usuarios...");
+    // await User.deleteMany({});
+
+    console.log("✨ Base de datos limpiada con éxito.");
+    console.log("Los usuarios NO han sido borrados (para no perder acceso). Si deseas borrarlos, edita este script.");
+    
+    process.exit(0);
   } catch (error) {
-    console.error("❌ Error durante el seed:", error);
+    console.error("❌ Error durante la limpieza:", error);
     process.exit(1);
   }
 }
 
-seedData();
+cleanData();

@@ -31,7 +31,7 @@ const IncomeSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['completed', 'cancelled', 'debt'],
+    enum: ['completed', 'cancelled', 'debt', 'collected'],
     default: 'completed'
   },
   metodo: {

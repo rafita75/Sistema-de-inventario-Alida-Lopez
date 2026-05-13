@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/InvoicesManager.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../../shared/services/api';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
@@ -22,11 +22,7 @@ export default function InvoicesManager() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
-  useEffect(() => {
-    loadInvoices();
-  }, [filter, dates, currentPage]);
-
-  const loadInvoices = async () => {
+  const loadInvoices = useCallback(async () => {
     setLoading(true);
     try {
       const params = { page: currentPage, limit: 15 };
@@ -67,6 +63,18 @@ export default function InvoicesManager() {
     } finally {
       setLoading(false);
     }
+  }, [currentPage, dates.end, dates.start, filter, notify]);
+
+  useEffect(() => {
+    loadInvoices();
+  }, [loadInvoices]);
+
+  const getInvoiceStatus = (invoice) => {
+    if (invoice.status === 'collected' || invoice.notas?.includes('Pagada:')) {
+      return 'collected';
+    }
+
+    return invoice.status;
   };
 
   const filteredInvoices = invoices.filter(inv => 
@@ -239,31 +247,35 @@ export default function InvoicesManager() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredInvoices.map(inv => (
-                    <tr key={inv._id} className={`hover:bg-green-50/30 transition-colors ${selectedIds.includes(inv._id) ? 'bg-green-50' : ''}`}>
-                      <td className="p-6">
-                        <input type="checkbox" className="w-5 h-5 accent-green-600 cursor-pointer" checked={selectedIds.includes(inv._id)} onChange={() => toggleSelect(inv._id)} />
-                      </td>
-                      <td className="p-6 font-mono font-bold text-green-700">#{inv.invoiceNumber || 'MANUAL'}</td>
-                      <td className="p-6 text-gray-500 whitespace-nowrap text-xs font-medium">
-                        {new Date(inv.fecha).toLocaleDateString()}
-                        <span className="text-[10px] block opacity-40 font-bold">{new Date(inv.fecha).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                      </td>
-                      <td className="p-6">
-                        <p className="font-bold text-gray-800">{inv.clienteNombre || 'Mostrador'}</p>
-                        <p className="text-[10px] text-gray-400 uppercase font-black">{inv.metodo}</p>
-                      </td>
-                      <td className="p-6 text-right font-black text-gray-900 text-base">Q{inv.monto.toLocaleString()}</td>
-                      <td className="p-6 text-center">
-                        <span className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest ${inv.status === 'completed' ? 'bg-green-100 text-green-700' : inv.status === 'debt' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                          {inv.status === 'completed' ? 'PAGADA' : inv.status === 'debt' ? 'DEUDA' : 'ANULADA'}
-                        </span>
-                      </td>
-                      <td className="p-6 text-center">
-                        <button onClick={() => { const doc = jsPDF({ unit: 'mm', format: [80, 200] }); drawTicket(doc, inv); window.open(doc.output('bloburl'), '_blank'); }} className="p-3 bg-gray-100 text-gray-500 rounded-2xl hover:bg-green-600 hover:text-white transition-all">🖨️</button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredInvoices.map(inv => {
+                    const status = getInvoiceStatus(inv);
+
+                    return (
+                      <tr key={inv._id} className={`hover:bg-green-50/30 transition-colors ${selectedIds.includes(inv._id) ? 'bg-green-50' : ''}`}>
+                        <td className="p-6">
+                          <input type="checkbox" className="w-5 h-5 accent-green-600 cursor-pointer" checked={selectedIds.includes(inv._id)} onChange={() => toggleSelect(inv._id)} />
+                        </td>
+                        <td className="p-6 font-mono font-bold text-green-700">#{inv.invoiceNumber || 'MANUAL'}</td>
+                        <td className="p-6 text-gray-500 whitespace-nowrap text-xs font-medium">
+                          {new Date(inv.fecha).toLocaleDateString()}
+                          <span className="text-[10px] block opacity-40 font-bold">{new Date(inv.fecha).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        </td>
+                        <td className="p-6">
+                          <p className="font-bold text-gray-800">{inv.clienteNombre || 'Mostrador'}</p>
+                          <p className="text-[10px] text-gray-400 uppercase font-black">{inv.metodo}</p>
+                        </td>
+                        <td className="p-6 text-right font-black text-gray-900 text-base">Q{inv.monto.toLocaleString()}</td>
+                        <td className="p-6 text-center">
+                          <span className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest ${status === 'completed' || status === 'collected' ? 'bg-green-100 text-green-700' : status === 'debt' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                            {status === 'completed' ? 'PAGADA' : status === 'collected' ? 'COBRADA' : status === 'debt' ? 'DEUDA' : 'ANULADA'}
+                          </span>
+                        </td>
+                        <td className="p-6 text-center">
+                          <button onClick={() => { const doc = jsPDF({ unit: 'mm', format: [80, 200] }); drawTicket(doc, inv); window.open(doc.output('bloburl'), '_blank'); }} className="p-3 bg-gray-100 text-gray-500 rounded-2xl hover:bg-green-600 hover:text-white transition-all">🖨️</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -271,32 +283,36 @@ export default function InvoicesManager() {
             {/* Vista Móvil con Scroll */}
             <div className="md:hidden">
                <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-4 p-4 scrollbar-hide">
-                 {filteredInvoices.map(inv => (
-                   <Card key={inv._id} className="p-5 border-l-4 border-l-blue-500 rounded-3xl shadow-sm">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <p className="font-black text-green-700 text-xs">#{inv.invoiceNumber || 'MANUAL'}</p>
-                          <p className="text-[10px] font-bold text-gray-400">{new Date(inv.fecha).toLocaleString()}</p>
+                 {filteredInvoices.map(inv => {
+                   const status = getInvoiceStatus(inv);
+
+                   return (
+                     <Card key={inv._id} className="p-5 border-l-4 border-l-blue-500 rounded-3xl shadow-sm">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <p className="font-black text-green-700 text-xs">#{inv.invoiceNumber || 'MANUAL'}</p>
+                            <p className="text-[10px] font-bold text-gray-400">{new Date(inv.fecha).toLocaleString()}</p>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[8px] font-black ${status === 'completed' || status === 'collected' ? 'bg-green-100 text-green-700' : status === 'debt' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                            {status === 'completed' ? 'PAGADA' : status === 'collected' ? 'COBRADA' : status === 'debt' ? 'DEUDA' : 'ANULADA'}
+                          </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-[8px] font-black ${inv.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {inv.status === 'completed' ? 'PAGADA' : 'DEUDA'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-end">
-                        <div>
-                           <p className="font-bold text-gray-800 text-sm">{inv.clienteNombre || 'Mostrador'}</p>
-                           <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{inv.metodo}</p>
+                        <div className="flex justify-between items-end">
+                          <div>
+                             <p className="font-bold text-gray-800 text-sm">{inv.clienteNombre || 'Mostrador'}</p>
+                             <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{inv.metodo}</p>
+                          </div>
+                          <p className="font-black text-gray-900 text-lg leading-none">Q{inv.monto.toLocaleString()}</p>
                         </div>
-                        <p className="font-black text-gray-900 text-lg leading-none">Q{inv.monto.toLocaleString()}</p>
-                      </div>
-                      <div className="flex gap-2 mt-4 pt-4 border-t border-gray-50">
-                        <Button size="sm" variant="outline" onClick={() => { const doc = jsPDF({ unit: 'mm', format: [80, 200] }); drawTicket(doc, inv); window.open(doc.output('bloburl'), '_blank'); }} className="flex-1 rounded-xl font-black text-[9px]">IMPRIMIR TICKET</Button>
-                        <div className="flex items-center px-2">
-                           <input type="checkbox" className="w-6 h-6 accent-green-600" checked={selectedIds.includes(inv._id)} onChange={() => toggleSelect(inv._id)} />
+                        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-50">
+                          <Button size="sm" variant="outline" onClick={() => { const doc = jsPDF({ unit: 'mm', format: [80, 200] }); drawTicket(doc, inv); window.open(doc.output('bloburl'), '_blank'); }} className="flex-1 rounded-xl font-black text-[9px]">IMPRIMIR TICKET</Button>
+                          <div className="flex items-center px-2">
+                             <input type="checkbox" className="w-6 h-6 accent-green-600" checked={selectedIds.includes(inv._id)} onChange={() => toggleSelect(inv._id)} />
+                          </div>
                         </div>
-                      </div>
-                   </Card>
-                 ))}
+                     </Card>
+                   );
+                 })}
                </div>
             </div>
 

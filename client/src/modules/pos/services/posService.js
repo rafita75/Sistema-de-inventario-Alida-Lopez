@@ -20,3 +20,8 @@ export const registerSale = async (saleData) => {
   const { data } = await api.post('/pos/sale', saleData);
   return data;
 };
+
+export const createScannerSession = async () => {
+  const { data } = await api.get('/auth/scanner-session');
+  return data;
+};

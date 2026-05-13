@@ -1,9 +1,8 @@
 // client/src/modules/inventory/pages/InventoryManager.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getAdminProducts } from '../../../shared/services/productService';
 import { adjustStock, adjustVariantStock } from '../services/inventoryService';
 import { getBrands } from '../../../shared/services/brandService';
-import { getSuppliers } from '../../../shared/services/supplierService';
 import InventorySummary from '../components/InventorySummary';
 import LowStockAlert from '../components/LowStockAlert';
 import StockMovementHistory from '../components/StockMovementHistory';
@@ -26,9 +25,7 @@ export default function InventoryManager() {
 
   // Filtros adicionales
   const [brands, setBrands] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
   const [selectedBrand, setSelectedBrand] = useState('all');
-  const [selectedSupplier, setSelectedSupplier] = useState('all');
   const [stockFilter, setStockFilter] = useState('all'); 
 
   const [showReponerModal, setShowReponerModal] = useState(false);
@@ -40,30 +37,24 @@ export default function InventoryManager() {
   const [reponerReason, setReponerReason] = useState('');
   const [reponerLoading, setReponerLoading] = useState(false);
 
-  useEffect(() => {
-    loadInitialData();
-  }, [currentPage, selectedBrand, selectedSupplier, stockFilter]);
-
   const handleSearch = (e) => {
     e.preventDefault();
     setCurrentPage(1);
     loadInitialData();
   };
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [productsData, brandsData, suppliersData] = await Promise.all([
+      const [productsData, brandsData] = await Promise.all([
         getAdminProducts({ 
           page: currentPage, 
           limit: 15, 
           search: searchTerm,
           brand: selectedBrand !== 'all' ? selectedBrand : undefined,
-          supplier: selectedSupplier !== 'all' ? selectedSupplier : undefined,
           stockStatus: stockFilter !== 'all' ? stockFilter : undefined
         }),
-        getBrands(),
-        getSuppliers()
+        getBrands()
       ]);
 
       if (productsData.products) {
@@ -75,14 +66,17 @@ export default function InventoryManager() {
       }
       
       setBrands(brandsData.brands || brandsData);
-      setSuppliers(suppliersData.suppliers || suppliersData);
     } catch (error) {
       console.error('Error cargando datos:', error);
       notify('Error al cargar inventario', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, notify, searchTerm, selectedBrand, stockFilter]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   const handleReponerStock = async () => {
     if (!selectedItem) return;

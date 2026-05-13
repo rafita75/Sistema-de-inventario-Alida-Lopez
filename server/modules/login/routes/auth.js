@@ -4,6 +4,7 @@ const User = require('../models/User');
 const auth = require('../middleware/auth');
 const { validateRegister, validateLogin, handleValidationErrors } = require('../middleware/validation');
 const { loginLimiter, registerLimiter } = require('../../../shared/middleware/rateLimit');
+const { requirePermission } = require('../../../shared/middleware/permissions');
 
 const router = express.Router();
 
@@ -158,6 +159,25 @@ router.put('/change-password', auth, async (req, res) => {
 // ============================================
 // SUSCRIPCIÓN PUSH
 // ============================================
+router.get('/scanner-session', auth, requirePermission('usePOS'), async (req, res) => {
+  try {
+    const token = jwt.sign(
+      {
+        id: req.user._id,
+        role: req.user.role,
+        name: req.user.name,
+        scope: 'scanner'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '10m' }
+    );
+
+    res.json({ token, expiresInMinutes: 10 });
+  } catch (error) {
+    res.status(500).json({ error: 'No se pudo generar la sesiÃ³n del escÃ¡ner' });
+  }
+});
+
 router.post('/push-subscribe', auth, async (req, res) => {
   try {
     const { subscription } = req.body;

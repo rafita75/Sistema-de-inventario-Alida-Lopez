@@ -1,4 +1,3 @@
-// client/src/modules/inventory/components/InventorySummary.jsx
 import { useState, useEffect } from 'react';
 import { getInventorySummary, getLowStockVariants } from '../services/inventoryService';
 
@@ -29,44 +28,47 @@ export default function InventorySummary() {
   if (loading) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {[1, 2, 3, 4].map(i => (
+        {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-28 bg-gray-100 rounded-2xl animate-pulse"></div>
         ))}
       </div>
     );
   }
 
+  const totalLowStock = (summary?.lowStockProducts || 0) + (summary?.lowStockVariants || lowStockVariantsCount || 0);
+  const outOfStockTotal = (summary?.outOfStock || 0) + (summary?.outOfStockVariants || 0);
+
   const stats = [
-    { 
-      label: 'Productos', 
-      value: summary?.totalProducts || 0, 
-      icon: '📦', 
-      bgColor: 'bg-blue-50', 
+    {
+      label: 'Productos',
+      value: summary?.totalProducts || 0,
+      icon: '📦',
+      bgColor: 'bg-blue-50',
       textColor: 'text-blue-600',
       borderColor: 'border-blue-100'
     },
-    { 
-      label: 'Variantes', 
-      value: summary?.totalVariants || 0, 
-      icon: '🎨', 
-      bgColor: 'bg-purple-50', 
+    {
+      label: 'Variantes',
+      value: summary?.totalVariants || 0,
+      icon: '🎨',
+      bgColor: 'bg-purple-50',
       textColor: 'text-purple-600',
       borderColor: 'border-purple-100'
     },
-    { 
-      label: 'Stock Crítico', 
-      value: (summary?.lowStockProducts || 0) + (summary?.lowStockVariants || 0) + (summary?.outOfStock || 0), 
-      icon: '⚠️', 
-      bgColor: 'bg-red-50', 
+    {
+      label: 'Stock Crítico',
+      value: totalLowStock + outOfStockTotal,
+      icon: '⚠️',
+      bgColor: 'bg-red-50',
       textColor: 'text-red-600',
       borderColor: 'border-red-100',
-      subtitle: `${summary?.outOfStock || 0} agotados · ${(summary?.lowStockProducts || 0) + (summary?.lowStockVariants || 0)} bajos`
+      subtitle: `${outOfStockTotal} agotados · ${totalLowStock} bajos`
     },
-    { 
-      label: 'Valor inventario', 
-      value: `Q${summary?.totalValue?.toLocaleString() || 0}`, 
-      icon: '💰', 
-      bgColor: 'bg-green-50', 
+    {
+      label: 'Valor inventario',
+      value: `Q${summary?.totalValue?.toLocaleString() || 0}`,
+      icon: '💰',
+      bgColor: 'bg-green-50',
       textColor: 'text-green-600',
       borderColor: 'border-green-100'
     }
@@ -75,8 +77,8 @@ export default function InventorySummary() {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       {stats.map((stat, idx) => (
-        <div 
-          key={idx} 
+        <div
+          key={idx}
           className={`${stat.bgColor} border ${stat.borderColor} rounded-2xl p-5 transition-all hover:shadow-md`}
         >
           <div className="flex items-start justify-between">

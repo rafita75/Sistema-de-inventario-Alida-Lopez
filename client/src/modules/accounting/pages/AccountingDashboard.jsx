@@ -28,11 +28,7 @@ export default function AccountingDashboard() {
   const [confirmDebt, setConfirmDebt] = useState({ open: false, id: null, type: 'customer' });
   const [paying, setPaying] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [dashRes, balanceRes] = await Promise.all([
@@ -47,7 +43,11 @@ export default function AccountingDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [notify]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handlePayDebt = async () => {
     setPaying(true);

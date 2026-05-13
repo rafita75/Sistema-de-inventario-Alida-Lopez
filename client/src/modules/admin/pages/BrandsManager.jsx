@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/BrandsManager.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getBrands, createBrand, updateBrand, deleteBrand } from '../../../shared/services/brandService';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
@@ -25,9 +25,7 @@ export default function BrandsManager() {
   const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null });
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { loadData(); }, [currentPage]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getBrands({ page: currentPage, limit: 12 });
@@ -44,7 +42,9 @@ export default function BrandsManager() {
     } finally { 
       setLoading(false); 
     }
-  };
+  }, [currentPage, notify]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

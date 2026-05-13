@@ -1,17 +1,16 @@
-// client/src/components/accounting/ExpenseModal.jsx
 import { useState } from 'react';
 import api from '../../../../shared/services/api';
 import Button from '../../../core/components/UI/Button';
 import Input from '../../../core/components/UI/Input';
 
 const categorias = [
-  { value: 'insumos', label: '📦 Insumos / Materia prima', color: 'blue' },
-  { value: 'servicios', label: '💡 Servicios (luz, agua, internet)', color: 'yellow' },
-  { value: 'renta', label: '🏠 Renta / Alquiler', color: 'orange' },
-  { value: 'sueldos', label: '👥 Sueldos', color: 'purple' },
-  { value: 'publicidad', label: '📢 Publicidad', color: 'pink' },
-  { value: 'transporte', label: '🚚 Transporte', color: 'indigo' },
-  { value: 'otros', label: '📝 Otros', color: 'gray' }
+  { value: 'insumos', label: '📦 Insumos / Materia prima', activeClasses: 'border-blue-500 bg-blue-50 text-blue-700' },
+  { value: 'servicios', label: '💡 Servicios (luz, agua, internet)', activeClasses: 'border-yellow-500 bg-yellow-50 text-yellow-700' },
+  { value: 'renta', label: '🏠 Renta / Alquiler', activeClasses: 'border-orange-500 bg-orange-50 text-orange-700' },
+  { value: 'sueldos', label: '👥 Sueldos', activeClasses: 'border-purple-500 bg-purple-50 text-purple-700' },
+  { value: 'publicidad', label: '📢 Publicidad', activeClasses: 'border-pink-500 bg-pink-50 text-pink-700' },
+  { value: 'transporte', label: '🚚 Transporte', activeClasses: 'border-indigo-500 bg-indigo-50 text-indigo-700' },
+  { value: 'otros', label: '📝 Otros', activeClasses: 'border-gray-500 bg-gray-50 text-gray-700' }
 ];
 
 export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
@@ -28,7 +27,7 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
     e.preventDefault();
     setLoading(true);
     setError('');
-    
+
     try {
       await api.post('/accounting/expense', formData);
       onSuccess();
@@ -53,13 +52,13 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
             ✕
           </button>
         </div>
-        
+
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-xl text-sm border border-red-200">
             {error}
           </div>
         )}
-        
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
             label="Monto"
@@ -71,18 +70,18 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
             step="0.01"
             icon="💰"
           />
-          
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
             <div className="grid grid-cols-2 gap-2">
-              {categorias.map(cat => (
+              {categorias.map((cat) => (
                 <button
                   key={cat.value}
                   type="button"
                   onClick={() => setFormData({ ...formData, categoria: cat.value })}
                   className={`p-2 rounded-xl border-2 text-sm font-medium transition ${
                     formData.categoria === cat.value
-                      ? `border-${cat.color}-500 bg-${cat.color}-50 text-${cat.color}-700`
+                      ? cat.activeClasses
                       : 'border-gray-200 hover:border-gray-300 text-gray-600'
                   }`}
                 >
@@ -91,7 +90,7 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
               ))}
             </div>
           </div>
-          
+
           <Input
             label="Descripción"
             type="text"
@@ -101,7 +100,7 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
             required
             icon="📝"
           />
-          
+
           <Input
             label="Comprobante (URL)"
             type="text"
@@ -110,7 +109,7 @@ export default function ExpenseModal({ isOpen, onClose, onSuccess }) {
             placeholder="https://..."
             icon="🔗"
           />
-          
+
           <div className="flex gap-3 pt-2">
             <Button
               type="submit"

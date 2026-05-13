@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/SuppliersManager.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../../../shared/services/supplierService';
 import Button from '../../core/components/UI/Button';
 import Input from '../../core/components/UI/Input';
@@ -25,9 +25,7 @@ export default function SuppliersManager() {
   const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null });
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { loadData(); }, [currentPage]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const data = await getSuppliers({ page: currentPage, limit: 12 });
@@ -43,7 +41,9 @@ export default function SuppliersManager() {
       notify('Error al cargar proveedores', 'error');
     }
     finally { setLoading(false); }
-  };
+  }, [currentPage, notify]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

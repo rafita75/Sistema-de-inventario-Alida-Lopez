@@ -14,7 +14,6 @@ export default function CashClosingManager() {
   const [contadoFisico, setContadoFisico] = useState('');
   const [notas, setNotas] = useState('');
   const [history, setHistory] = useState([]);
-  const [message, setMessage] = useState('');
   const [alreadyClosed, setAlreadyClosed] = useState(false);
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/EmployeesManager.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../../../shared/services/api';
 import Button from '../../core/components/UI/Button';
 import Card from '../../core/components/UI/Card';
@@ -46,11 +46,7 @@ export default function EmployeesManager() {
     viewCustomers: false
   });
 
-  useEffect(() => {
-    loadEmployees();
-  }, [currentPage]);
-
-  const loadEmployees = async () => {
+  const loadEmployees = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await api.get('/employees', { params: { page: currentPage, limit: 10 } });
@@ -67,7 +63,11 @@ export default function EmployeesManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, notify]);
+
+  useEffect(() => {
+    loadEmployees();
+  }, [loadEmployees]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

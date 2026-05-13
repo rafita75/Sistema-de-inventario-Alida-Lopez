@@ -1,5 +1,5 @@
 // client/src/modules/inventory/components/StockMovementHistory.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getSales, getFilteredMovements, getMovementStats } from '../services/inventoryService';
 
 const typeLabels = {
@@ -28,11 +28,7 @@ export default function StockMovementHistory() {
     type: ''
   });
 
-  useEffect(() => {
-    loadData();
-  }, [filters, viewMode]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       if (viewMode === 'grouped') {
@@ -49,7 +45,11 @@ export default function StockMovementHistory() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters, viewMode]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   if (loading) {
     return (

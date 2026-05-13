@@ -1,6 +1,7 @@
 // client/src/shared/services/socketService.js
 import { io } from 'socket.io-client';
 import api from './api';
+import { getStoredToken } from './authStorage';
 
 let socket = null;
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || 'BIqCZYmZJqq53fJCwLPgvKSDbRaQiGQnrSeX3MoWS5gxIh1tuKUO3haEu2LGCAbmE2TqSg7iQ7zkTGgcySc2tvI';
@@ -16,8 +17,8 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-export const initSocket = (userId) => {
-  const token = localStorage.getItem('token');
+export const initSocket = () => {
+  const token = getStoredToken();
   
   if (!token) {
     console.warn('⚠️ No hay token para inicializar Socket');

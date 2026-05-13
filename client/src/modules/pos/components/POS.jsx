@@ -1,17 +1,21 @@
 // client/src/modules/pos/components/POS.jsx
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { getProductByBarcode, searchProducts, getProductVariants, registerSale } from '../services/posService';
+import { useState, useEffect, useRef } from 'react';
+import {
+  createScannerSession,
+  getProductByBarcode,
+  searchProducts,
+  getProductVariants,
+  registerSale
+} from '../services/posService';
 import Button from '../../core/components/UI/Button';
 import Card from '../../core/components/UI/Card';
 import { QRCodeSVG } from 'qrcode.react';
-import { useAuth } from '../../login/contexts/AuthContext';
 import { Html5Qrcode } from 'html5-qrcode';
 import { useNotification } from '../../../shared/contexts/NotificationContext';
 import ConfirmModal from '../../core/components/UI/ConfirmModal';
 import { getSocket } from '../../../shared/services/socketService';
 
 export default function POS({ onClose, onSaleComplete }) {
-  const { user } = useAuth();
   const { notify } = useNotification();
   const [cart, setCart] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,7 +31,11 @@ export default function POS({ onClose, onSaleComplete }) {
   
   const [showNativeScanner, setShowNativeScanner] = useState(false);
   const [showPairingQR, setShowPairingQR] = useState(false);
+  const [pairingUrl, setPairingUrl] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingError, setPairingError] = useState('');
   const nativeScannerRef = useRef(null);
+  const submitBarcodeRef = useRef(null);
   
   const barcodeRef = useRef(null);
   const lastScannedCodeRef = useRef(null);
@@ -43,7 +51,7 @@ export default function POS({ onClose, onSaleComplete }) {
     if (socket) {
       const handleRemoteBarcode = (data) => {
         if (data.barcode) {
-          submitBarcode(data.barcode);
+          submitBarcodeRef.current?.(data.barcode);
         }
       };
       socket.on('barcode-received', handleRemoteBarcode);
@@ -99,7 +107,24 @@ export default function POS({ onClose, onSaleComplete }) {
     }, 300);
   };
 
-  const submitBarcode = async (code) => {
+  const openPairingQr = async () => {
+    setShowPairingQR(true);
+    setPairingLoading(true);
+    setPairingError('');
+
+    try {
+      const session = await createScannerSession();
+      const token = encodeURIComponent(session.token);
+      setPairingUrl(`${window.location.origin}/scanner?token=${token}`);
+    } catch (error) {
+      setPairingError('No se pudo generar la sesiÃ³n del escÃ¡ner remoto.');
+      notify('No se pudo preparar el escÃ¡ner remoto', 'error');
+    } finally {
+      setPairingLoading(false);
+    }
+  };
+
+  async function submitBarcode(code) {
     if (!code.trim()) return;
 
     const now = Date.now();
@@ -146,7 +171,11 @@ export default function POS({ onClose, onSaleComplete }) {
       setBarcodeInput('');
       lastScannedCodeRef.current = null; // Permitir re-intento si falló la red
     }
-  };
+  }
+
+  useEffect(() => {
+    submitBarcodeRef.current = submitBarcode;
+  });
 
   const handleBarcodeChange = (e) => setBarcodeInput(e.target.value);
   const handleBarcodeSubmit = (e) => {
@@ -225,7 +254,11 @@ export default function POS({ onClose, onSaleComplete }) {
       const result = await registerSale(saleData);
       notify(`Venta #${result.saleNumber} registrada`, 'success');
       if (onSaleComplete) onSaleComplete();
-      setCart([]); setClienteNombre(''); onClose();
+      setCart([]);
+      setClienteNombre('');
+      setPaymentMethod('efectivo');
+      setIsDebt(false);
+      onClose();
     } catch (error) {
       notify('Error al procesar venta', 'error');
     } finally { setLoading(false); }
@@ -249,8 +282,6 @@ export default function POS({ onClose, onSaleComplete }) {
     </div>
   );
 
-  const mobileScannerUrl = `${window.location.origin}/scanner?user=${user?.id || user?._id}`;
-
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-3xl w-full max-w-6xl h-[85vh] overflow-hidden shadow-2xl animate-scale-in flex flex-col">
@@ -261,7 +292,7 @@ export default function POS({ onClose, onSaleComplete }) {
               <span className="w-1.5 h-6 bg-green-600 rounded-full"></span> 💰 Nueva Venta
             </h2>
             <button 
-              onClick={() => isMobile ? startNativeScanner() : setShowPairingQR(true)}
+              onClick={() => isMobile ? startNativeScanner() : openPairingQr()}
               className="flex items-center gap-2 px-4 py-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-gray-600 font-bold text-xs transition-all border border-gray-100 shadow-sm"
             >
               <span>{isMobile ? '📷 Abrir Escáner' : '📱 Conectar Celular'}</span>
@@ -303,6 +334,24 @@ export default function POS({ onClose, onSaleComplete }) {
                         <button onClick={() => setIsDebt(false)} className={`py-4 rounded-2xl text-[10px] font-black uppercase transition-all ${!isDebt ? 'bg-green-600 text-white shadow-xl' : 'bg-gray-800 text-gray-500'}`}>💵 Efectivo</button>
                         <button onClick={() => setIsDebt(true)} className={`py-4 rounded-2xl text-[10px] font-black uppercase transition-all ${isDebt ? 'bg-yellow-500 text-white shadow-xl' : 'bg-gray-800 text-gray-500'}`}>📝 Crédito</button>
                       </div>
+                      {!isDebt && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: 'efectivo', label: 'Efectivo' },
+                            { id: 'transferencia', label: 'Transfer.' },
+                            { id: 'tarjeta', label: 'Tarjeta' }
+                          ].map((method) => (
+                            <button
+                              key={method.id}
+                              type="button"
+                              onClick={() => setPaymentMethod(method.id)}
+                              className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all ${paymentMethod === method.id ? 'bg-white text-gray-900 shadow-md' : 'bg-gray-800 text-gray-500'}`}
+                            >
+                              {method.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <Button variant="success" onClick={handleCheckout} loading={loading} disabled={cart.length === 0} className="w-full bg-green-500 h-16 rounded-2xl text-xl font-black transition-all shadow-xl">FINALIZAR VENTA</Button>
                    </div>
                 </div>
@@ -366,6 +415,24 @@ export default function POS({ onClose, onSaleComplete }) {
                   <button onClick={() => setIsDebt(false)} className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all ${!isDebt ? 'bg-green-600 text-white shadow-lg shadow-green-900/20' : 'bg-white border-2 text-gray-400'}`}>💵 Efectivo</button>
                   <button onClick={() => setIsDebt(true)} className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all ${isDebt ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-900/20' : 'bg-white border-2 text-gray-400'}`}>📝 Crédito</button>
                 </div>
+                {!isDebt && (
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {[
+                      { id: 'efectivo', label: 'Efectivo' },
+                      { id: 'transferencia', label: 'Transfer.' },
+                      { id: 'tarjeta', label: 'Tarjeta' }
+                    ].map((method) => (
+                      <button
+                        key={method.id}
+                        type="button"
+                        onClick={() => setPaymentMethod(method.id)}
+                        className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all ${paymentMethod === method.id ? 'bg-blue-50 border-2 border-blue-500 text-blue-700' : 'bg-white border-2 text-gray-400'}`}
+                      >
+                        {method.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <Button variant="success" onClick={handleCheckout} loading={loading} disabled={cart.length === 0} className="w-full bg-green-600 h-14 rounded-2xl text-lg font-black shadow-xl shadow-green-100 hover:scale-[1.02] active:scale-95 transition-all">FINALIZAR VENTA</Button>
               </div>
             </div>
@@ -399,9 +466,31 @@ export default function POS({ onClose, onSaleComplete }) {
             <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-inner">📱</div>
             <h3 className="text-2xl font-black text-gray-800 mb-2 tracking-tighter uppercase">Escáner Remoto</h3>
             <p className="text-gray-500 mb-8 text-xs leading-relaxed font-medium">Escanea este código para conectar tu celular.</p>
-            <div className="bg-gray-50 p-6 rounded-3xl inline-block border-2 border-dashed border-gray-200 mb-8 shadow-inner"><QRCodeSVG value={mobileScannerUrl} size={180} level="H" includeMargin={false} /></div>
+            <div className="bg-gray-50 p-6 rounded-3xl inline-block border-2 border-dashed border-gray-200 mb-8 shadow-inner min-h-[228px] min-w-[228px]">
+              {pairingLoading ? (
+                <div className="w-[180px] h-[180px] flex flex-col items-center justify-center gap-4 text-gray-500">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+                  <p className="text-[10px] font-black uppercase tracking-widest">Preparando sesiÃ³n...</p>
+                </div>
+              ) : pairingUrl ? (
+                <QRCodeSVG value={pairingUrl} size={180} level="H" includeMargin={false} />
+              ) : (
+                <div className="w-[180px] h-[180px] flex items-center justify-center text-[10px] font-black uppercase tracking-widest text-red-500">
+                  No disponible
+                </div>
+              )}
+            </div>
             <div className="space-y-3">
-              <div className="p-3 bg-blue-50 rounded-2xl text-blue-700 text-[10px] font-bold border border-blue-100 italic tracking-tighter">Asegúrate de estar en la misma red Wi-Fi</div>
+              {pairingError ? (
+                <div className="p-3 bg-red-50 rounded-2xl text-red-700 text-[10px] font-bold border border-red-100 tracking-tighter">{pairingError}</div>
+              ) : (
+                <div className="p-3 bg-blue-50 rounded-2xl text-blue-700 text-[10px] font-bold border border-blue-100 italic tracking-tighter">La sesión dura 10 minutos. Asegúrate de estar en la misma red Wi-Fi.</div>
+              )}
+              {pairingError && (
+                <Button variant="outline" onClick={openPairingQr} className="w-full h-12 rounded-2xl font-bold">
+                  Reintentar
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => setShowPairingQR(false)} className="w-full h-12 rounded-2xl font-bold">Cerrar</Button>
             </div>
           </div>

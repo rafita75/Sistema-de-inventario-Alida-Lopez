@@ -44,6 +44,7 @@ export default function LowStockAlert() {
     setPurchasePrice(item.purchasePrice || 0);
     setPriceChanged(false);
     setAdjustQuantity(0);
+    setReason('');
   };
 
   const handleAdjustStock = async () => {
@@ -171,6 +172,17 @@ export default function LowStockAlert() {
                   />
                 </div>
               )}
+
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Motivo / notas</label>
+                <input
+                  type="text"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none text-sm font-medium focus:border-orange-500 transition-all"
+                  placeholder="Compra semanal, proveedor, factura..."
+                />
+              </div>
               
               <div className="flex gap-3 pt-2">
                 <Button

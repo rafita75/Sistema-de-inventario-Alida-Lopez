@@ -1,6 +1,13 @@
 // client/src/modules/login/contexts/AuthContext.jsx
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../../../shared/services/api';
+import { disconnectSocket } from '../../../shared/services/socketService';
+import {
+  bootstrapTokenFromUrl,
+  clearStoredToken,
+  getStoredToken,
+  storeToken
+} from '../../../shared/services/authStorage';
 
 const AuthContext = createContext();
 
@@ -11,7 +18,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const verifyToken = async () => {
-      const token = localStorage.getItem('token');
+      const token = bootstrapTokenFromUrl() || getStoredToken();
       
       if (!token) {
         setLoading(false);
@@ -24,7 +31,7 @@ export function AuthProvider({ children }) {
         setPermissions(data.user.permissions);
       } catch (error) {
         console.error('Token inválido:', error);
-        localStorage.removeItem('token');
+        clearStoredToken();
         setUser(null);
       } finally {
         setLoading(false);
@@ -36,7 +43,7 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
-    localStorage.setItem('token', data.token);
+    storeToken(data.token, { persistent: true });
     setUser(data.user);
     setPermissions(data.user.permissions);
     return data;
@@ -44,14 +51,15 @@ export function AuthProvider({ children }) {
 
   const register = async (name, email, password) => {
     const { data } = await api.post('/auth/register', { name, email, password });
-    localStorage.setItem('token', data.token);
+    storeToken(data.token, { persistent: true });
     setUser(data.user);
     setPermissions(data.user.permissions);
     return data;
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    clearStoredToken();
+    disconnectSocket();
     setUser(null);
     setPermissions(null);
   };

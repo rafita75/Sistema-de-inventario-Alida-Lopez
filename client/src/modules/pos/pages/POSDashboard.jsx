@@ -1,5 +1,5 @@
 // client/src/modules/pos/pages/POSDashboard.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import POS from '../components/POS';
 import api from '../../../shared/services/api';
 import Card from '../../core/components/UI/Card';
@@ -25,18 +25,7 @@ export default function POSDashboard() {
   const [confirmDebt, setConfirmDebt] = useState({ open: false, id: null, cliente: '', monto: 0 });
   const [paying, setPaying] = useState(false);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const loadDashboardData = async () => {
-    await Promise.all([
-      loadTodaySales(),
-      loadPendingDebts()
-    ]);
-  };
-
-  async function loadTodaySales() {
+  const loadTodaySales = useCallback(async () => {
     setStats(prev => ({ ...prev, loading: true }));
     try {
       const hoy = new Date();
@@ -72,9 +61,9 @@ export default function POSDashboard() {
         loading: false
       }));
     }
-  }
+  }, []);
 
-  async function loadPendingDebts() {
+  const loadPendingDebts = useCallback(async () => {
     try {
       const response = await api.get('/accounting/customer-debts');
       const todasLasDeudas = response.data || [];
@@ -94,7 +83,39 @@ export default function POSDashboard() {
         totalDeudasPendientes: 0
       }));
     }
-  }
+  }, []);
+
+  const loadDashboardData = useCallback(async () => {
+    await Promise.all([
+      loadTodaySales(),
+      loadPendingDebts()
+    ]);
+  }, [loadPendingDebts, loadTodaySales]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  const getSaleStatus = (sale) => {
+    if (sale.status === 'collected' || sale.notas?.includes('Pagada:')) {
+      return {
+        label: 'COBRADA',
+        classes: 'bg-green-100 text-green-700'
+      };
+    }
+
+    if (sale.esDeuda) {
+      return {
+        label: 'DEUDA',
+        classes: 'bg-yellow-100 text-yellow-700'
+      };
+    }
+
+    return {
+      label: 'PAGADO',
+      classes: 'bg-green-100 text-green-700'
+    };
+  };
 
   const handlePayDebt = async () => {
     setPaying(true);
@@ -176,21 +197,25 @@ export default function POSDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {stats.ventas.map(venta => (
-                  <tr key={venta._id} className="hover:bg-gray-50 transition">
-                    <td className="p-4 font-mono font-bold text-green-700">#{venta.invoiceNumber || 'POS'}</td>
-                    <td className="p-4">
-                      <p className="font-bold text-gray-800">{venta.clienteNombre}</p>
-                      <p className="text-[10px] text-gray-400 uppercase">{venta.metodo}</p>
-                    </td>
-                    <td className="p-4 text-right font-black text-gray-900">Q{venta.monto.toLocaleString()}</td>
-                    <td className="p-4 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${venta.esDeuda ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
-                        {venta.esDeuda ? 'DEUDA' : 'PAGADO'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {stats.ventas.map(venta => {
+                  const saleStatus = getSaleStatus(venta);
+
+                  return (
+                    <tr key={venta._id} className="hover:bg-gray-50 transition">
+                      <td className="p-4 font-mono font-bold text-green-700">#{venta.invoiceNumber || 'POS'}</td>
+                      <td className="p-4">
+                        <p className="font-bold text-gray-800">{venta.clienteNombre}</p>
+                        <p className="text-[10px] text-gray-400 uppercase">{venta.metodo}</p>
+                      </td>
+                      <td className="p-4 text-right font-black text-gray-900">Q{venta.monto.toLocaleString()}</td>
+                      <td className="p-4 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${saleStatus.classes}`}>
+                          {saleStatus.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {stats.ventas.length === 0 && (
                   <tr><td colSpan="4" className="p-8 text-center text-gray-400">No hay ventas registradas hoy</td></tr>
                 )}

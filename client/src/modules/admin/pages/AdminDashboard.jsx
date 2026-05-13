@@ -1,5 +1,5 @@
 // client/src/modules/admin/pages/AdminDashboard.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAuth } from '../../login/contexts/AuthContext';
 import api from '../../../shared/services/api';
 import { 
@@ -7,17 +7,17 @@ import {
 } from 'recharts';
 
 // Componentes de Gestión
-import ProductsManager from './ProductsManager';
-import CategoriesManager from './CategoriesManager';
-import SuppliersManager from './SuppliersManager';
-import BrandsManager from './BrandsManager';
-import PrintBarcodes from '../../inventory/pages/PrintBarcodes';
-import InvoicesManager from './InvoicesManager';
-import CashClosingManager from './CashClosingManager';
-import AccountingDashboard from '../../accounting/pages/AccountingDashboard';
-import InventoryManager from '../../inventory/pages/InventoryManager';
-import POSDashboard from '../../pos/pages/POSDashboard';
-import EmployeesManager from './EmployeesManager';
+const ProductsManager = lazy(() => import('./ProductsManager'));
+const CategoriesManager = lazy(() => import('./CategoriesManager'));
+const SuppliersManager = lazy(() => import('./SuppliersManager'));
+const BrandsManager = lazy(() => import('./BrandsManager'));
+const PrintBarcodes = lazy(() => import('../../inventory/pages/PrintBarcodes'));
+const InvoicesManager = lazy(() => import('./InvoicesManager'));
+const CashClosingManager = lazy(() => import('./CashClosingManager'));
+const AccountingDashboard = lazy(() => import('../../accounting/pages/AccountingDashboard'));
+const InventoryManager = lazy(() => import('../../inventory/pages/InventoryManager'));
+const POSDashboard = lazy(() => import('../../pos/pages/POSDashboard'));
+const EmployeesManager = lazy(() => import('./EmployeesManager'));
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth(); 
@@ -54,13 +54,9 @@ export default function AdminDashboard() {
   if (isAdmin || perms.viewAccounting) menuItems.push({ id: 'accounting', label: 'Contabilidad', icon: '💰', group: 'finanzas' });
   if (isAdmin || perms.performCashClosing) menuItems.push({ id: 'cash-closing', label: 'Cierre de Caja', icon: '🏁', group: 'finanzas' });
 
-  useEffect(() => {
-    if (menuItems.length > 0 && !activeTab) setActiveTab(menuItems[0].id);
-    if (isAdmin) loadFullDashboard();
-    setLoading(false);
-  }, [isAdmin, user]);
+  const firstMenuItemId = menuItems[0]?.id || '';
 
-  const loadFullDashboard = async () => {
+  const loadFullDashboard = useCallback(async () => {
     try {
       const [statsRes, reportRes, lowStockRes] = await Promise.all([
         api.get('/accounting/dashboard-stats'),
@@ -82,9 +78,51 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Error dashboard:', error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!activeTab && firstMenuItemId) {
+      setActiveTab(firstMenuItemId);
+    }
+  }, [activeTab, firstMenuItemId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initializeDashboard() {
+      if (isAdmin) {
+        await loadFullDashboard();
+      }
+
+      if (isMounted) {
+        setLoading(false);
+      }
+    }
+
+    initializeDashboard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAdmin, loadFullDashboard]);
+
+  useEffect(() => {
+    const handleTabChange = (event) => {
+      if (event.detail?.tab) {
+        setActiveTab(event.detail.tab);
+      }
+    };
+
+    window.addEventListener('changeAdminTab', handleTabChange);
+    return () => window.removeEventListener('changeAdminTab', handleTabChange);
+  }, []);
 
   const handleLogout = () => { logout(); window.location.href = '/login'; };
+  const moduleFallback = (
+    <div className="bg-white rounded-2xl p-12 text-center shadow-sm border border-gray-100">
+      Cargando modulo...
+    </div>
+  );
 
   if (loading) return <div className="p-8 text-center">Cargando...</div>;
 
@@ -260,17 +298,17 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {activeTab === 'employees' && isAdmin && <EmployeesManager />}
-          {activeTab === 'products' && (isAdmin || perms.viewProducts) && <ProductsManager />}
-          {activeTab === 'categories' && (isAdmin || perms.viewCategories) && <CategoriesManager />}
-          {activeTab === 'invoices' && (isAdmin || perms.viewInvoices) && <InvoicesManager />}
-          {activeTab === 'brands' && (isAdmin || perms.viewBrands) && <BrandsManager />}
-          {activeTab === 'suppliers' && (isAdmin || perms.viewSuppliers) && <SuppliersManager />}
-          {activeTab === 'barcodes' && (isAdmin || perms.printBarcodes) && <PrintBarcodes />}
-          {activeTab === 'inventory' && (isAdmin || perms.viewInventory) && <InventoryManager />}
-          {activeTab === 'pos' && (isAdmin || perms.usePOS) && <POSDashboard onSaleComplete={loadFullDashboard} />}
-          {activeTab === 'accounting' && (isAdmin || perms.viewAccounting) && <AccountingDashboard />}
-          {activeTab === 'cash-closing' && (isAdmin || perms.performCashClosing) && <CashClosingManager />}
+          {activeTab === 'employees' && isAdmin && <Suspense fallback={moduleFallback}><EmployeesManager /></Suspense>}
+          {activeTab === 'products' && (isAdmin || perms.viewProducts) && <Suspense fallback={moduleFallback}><ProductsManager /></Suspense>}
+          {activeTab === 'categories' && (isAdmin || perms.viewCategories) && <Suspense fallback={moduleFallback}><CategoriesManager /></Suspense>}
+          {activeTab === 'invoices' && (isAdmin || perms.viewInvoices) && <Suspense fallback={moduleFallback}><InvoicesManager /></Suspense>}
+          {activeTab === 'brands' && (isAdmin || perms.viewBrands) && <Suspense fallback={moduleFallback}><BrandsManager /></Suspense>}
+          {activeTab === 'suppliers' && (isAdmin || perms.viewSuppliers) && <Suspense fallback={moduleFallback}><SuppliersManager /></Suspense>}
+          {activeTab === 'barcodes' && (isAdmin || perms.printBarcodes) && <Suspense fallback={moduleFallback}><PrintBarcodes /></Suspense>}
+          {activeTab === 'inventory' && (isAdmin || perms.viewInventory) && <Suspense fallback={moduleFallback}><InventoryManager /></Suspense>}
+          {activeTab === 'pos' && (isAdmin || perms.usePOS) && <Suspense fallback={moduleFallback}><POSDashboard onSaleComplete={loadFullDashboard} /></Suspense>}
+          {activeTab === 'accounting' && (isAdmin || perms.viewAccounting) && <Suspense fallback={moduleFallback}><AccountingDashboard /></Suspense>}
+          {activeTab === 'cash-closing' && (isAdmin || perms.performCashClosing) && <Suspense fallback={moduleFallback}><CashClosingManager /></Suspense>}
         </div>
       </main>
     </div>

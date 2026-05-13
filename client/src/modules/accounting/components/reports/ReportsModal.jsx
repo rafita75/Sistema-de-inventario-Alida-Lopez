@@ -1,5 +1,5 @@
 // client/src/components/accounting/ReportsModal.jsx
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -39,13 +39,7 @@ export default function ReportsModal({ isOpen, onClose }) {
   const [exporting, setExporting] = useState(false);
   const reportRef = useRef(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      loadReport();
-    }
-  }, [isOpen, filterType, customStart, customEnd]);
-
-  const loadReport = async () => {
+  const loadReport = useCallback(async () => {
     setLoading(true);
     try {
       let url = '/accounting/report';
@@ -64,7 +58,13 @@ export default function ReportsModal({ isOpen, onClose }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [customEnd, customStart, filterType]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadReport();
+    }
+  }, [isOpen, loadReport]);
 
   const exportToPDF = async () => {
     if (!reportRef.current) return;
