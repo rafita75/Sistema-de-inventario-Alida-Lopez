@@ -31,6 +31,10 @@ function buildMovementQuery(queryParams = {}) {
     query.productId = queryParams.productId;
   }
 
+  if (queryParams.variantId) {
+    query.variantId = queryParams.variantId;
+  }
+
   if (queryParams.type) {
     query.type = queryParams.type;
   }
@@ -50,6 +54,18 @@ function buildMovementQuery(queryParams = {}) {
   }
 
   return query;
+}
+
+function toInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.trunc(parsed);
+}
+
+function toNonNegativeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
 }
 
 async function listMovements(req, res) {
@@ -102,8 +118,11 @@ router.get('/summary', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
     
-    const totalProducts = await Product.countDocuments({ isActive: true });
-    const productsWithVariants = await Product.find({ hasVariants: true, isActive: true });
+    const [totalProducts, productsWithVariants, productsWithoutVariants] = await Promise.all([
+      Product.countDocuments({ isActive: true }),
+      Product.find({ hasVariants: true, isActive: true }),
+      Product.find({ isActive: true, hasVariants: { $ne: true } }).select('price stock')
+    ]);
     const totalVariants = productsWithVariants.reduce((sum, p) => sum + (p.variants?.length || 0), 0);
     const lowStockVariants = productsWithVariants.reduce((sum, product) => (
       sum + product.variants.filter((variant) => (
@@ -126,10 +145,14 @@ router.get('/summary', auth, async (req, res) => {
       stock: 0
     });
     
-    const totalValue = await Product.aggregate([
-      { $match: { isActive: true } },
-      { $group: { _id: null, total: { $sum: { $multiply: ['$price', '$stock'] } } } }
-    ]);
+    const simpleValue = productsWithoutVariants.reduce((sum, product) => (
+      sum + ((product.price || 0) * (product.stock || 0))
+    ), 0);
+    const variantValue = productsWithVariants.reduce((sum, product) => (
+      sum + product.variants.reduce((variantSum, variant) => (
+        variantSum + ((variant.price || 0) * (variant.stock || 0))
+      ), 0)
+    ), 0);
     
     res.json({
       totalProducts,
@@ -138,7 +161,7 @@ router.get('/summary', auth, async (req, res) => {
       lowStockVariants,
       outOfStockVariants,
       outOfStock,
-      totalValue: totalValue[0]?.total || 0
+      totalValue: simpleValue + variantValue
     });
   } catch (error) {
     console.error(error);
@@ -155,11 +178,26 @@ router.put('/products/:id/stock', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ajustar stock' });
     }
     
-    const { quantity, reason, purchasePrice } = req.body;
+    const quantity = toInteger(req.body.quantity);
+    const unitPurchasePrice = toNonNegativeNumber(req.body.purchasePrice);
+    const { reason } = req.body;
+
+    if (!quantity) {
+      return res.status(400).json({ error: 'Cantidad invalida' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Producto invalido' });
+    }
+
     const product = await Product.findById(req.params.id);
     
     if (!product) {
       return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    if (product.hasVariants) {
+      return res.status(400).json({ error: 'Ajusta el stock desde una variante especifica' });
     }
     
     const previousStock = product.stock;
@@ -170,6 +208,9 @@ router.put('/products/:id/stock', auth, async (req, res) => {
     }
     
     product.stock = newStock;
+    if (quantity > 0 && unitPurchasePrice > 0) {
+      product.purchasePrice = unitPurchasePrice;
+    }
     await product.save();
     
     // Registrar movimiento de stock
@@ -186,12 +227,12 @@ router.put('/products/:id/stock', auth, async (req, res) => {
     await movement.save();
     
     // 👈 EMITIR EVENTO para que Accounting registre el gasto
-    if (quantity > 0 && purchasePrice && purchasePrice > 0) {
+    if (quantity > 0 && unitPurchasePrice > 0) {
       await eventBus.emitAsync(EVENTS.EXPENSE_CREATED, {
-        monto: quantity * purchasePrice,
+        monto: quantity * unitPurchasePrice,
         categoria: 'insumos',
         descripcion: `Compra de inventario - ${product.name}`,
-        notas: `Cantidad: ${quantity} x Q${purchasePrice} = Q${quantity * purchasePrice}. Motivo: ${reason || 'Reposición de stock'}`,
+        notas: `Cantidad: ${quantity} x Q${unitPurchasePrice} = Q${quantity * unitPurchasePrice}. Motivo: ${reason || 'Reposicion de stock'}`,
         creadoPor: req.user.id
       });
     }
@@ -304,13 +345,28 @@ router.put('/variants/:productId/:variantId/stock', auth, async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ajustar stock' });
     }
     
-    const { quantity, reason, purchasePrice } = req.body;
+    const quantity = toInteger(req.body.quantity);
+    const unitPurchasePrice = toNonNegativeNumber(req.body.purchasePrice);
+    const { reason } = req.body;
+
+    if (!quantity) {
+      return res.status(400).json({ error: 'Cantidad invalida' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.productId)) {
+      return res.status(400).json({ error: 'Producto invalido' });
+    }
+
     const product = await Product.findById(req.params.productId);
     
     if (!product) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
     
+    if (!mongoose.Types.ObjectId.isValid(req.params.variantId)) {
+      return res.status(400).json({ error: 'Variante invalida' });
+    }
+
     const variant = product.variants.id(req.params.variantId);
     if (!variant) {
       return res.status(404).json({ error: 'Variante no encontrada' });
@@ -324,6 +380,9 @@ router.put('/variants/:productId/:variantId/stock', auth, async (req, res) => {
     }
     
     variant.stock = newStock;
+    if (quantity > 0 && unitPurchasePrice > 0) {
+      variant.purchasePrice = unitPurchasePrice;
+    }
     
     const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
     product.stock = totalStock;
@@ -332,6 +391,7 @@ router.put('/variants/:productId/:variantId/stock', auth, async (req, res) => {
     
     const movement = new StockMovement({
       productId: product._id,
+      variantId: variant._id,
       productName: `${product.name} - ${variant.name}`,
       type: 'adjustment',
       quantity,
@@ -342,12 +402,12 @@ router.put('/variants/:productId/:variantId/stock', auth, async (req, res) => {
     });
     await movement.save();
     
-    if (quantity > 0 && purchasePrice && purchasePrice > 0) {
+    if (quantity > 0 && unitPurchasePrice > 0) {
       await eventBus.emitAsync(EVENTS.EXPENSE_CREATED, {
-        monto: quantity * purchasePrice,
+        monto: quantity * unitPurchasePrice,
         categoria: 'insumos',
         descripcion: `Compra de inventario - ${product.name} - ${variant.name}`,
-        notas: `Cantidad: ${quantity} x Q${purchasePrice} = Q${quantity * purchasePrice}`,
+        notas: `Cantidad: ${quantity} x Q${unitPurchasePrice} = Q${quantity * unitPurchasePrice}`,
         creadoPor: req.user.id
       });
     }

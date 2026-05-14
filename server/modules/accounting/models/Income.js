@@ -20,6 +20,7 @@ const IncomeSchema = new mongoose.Schema({
   // Detalle de productos para la factura
   items: [{
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    variantId: { type: mongoose.Schema.Types.ObjectId, default: null },
     name: String,
     quantity: Number,
     price: Number,

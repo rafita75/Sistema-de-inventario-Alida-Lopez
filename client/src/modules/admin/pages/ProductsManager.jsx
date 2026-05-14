@@ -10,6 +10,16 @@ import { useNotification } from '../../../shared/contexts/NotificationContext';
 import ConfirmModal from '../../core/components/UI/ConfirmModal';
 import { TableSkeleton } from '../../core/components/UI/Skeleton';
 
+const toMoney = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const toUnits = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+};
+
 export default function ProductsManager() {
   const { notify } = useNotification();
   const [products, setProducts] = useState([]);
@@ -115,8 +125,22 @@ export default function ProductsManager() {
 
   const handleSaveVariant = async () => {
     try {
+      if (!editingVariantData.name?.trim()) {
+        notify('Ingresa el nombre de la variante', 'warning');
+        return;
+      }
+
       const updatedVariants = [...editingVariantProduct.variants];
-      updatedVariants[editingVariantData.variantIndex] = editingVariantData;
+      const { variantIndex, ...variantData } = editingVariantData;
+      updatedVariants[variantIndex] = {
+        ...updatedVariants[variantIndex],
+        ...variantData,
+        name: variantData.name.trim(),
+        price: toMoney(variantData.price),
+        purchasePrice: toMoney(variantData.purchasePrice),
+        stock: toUnits(variantData.stock),
+        minStock: toUnits(variantData.minStock || 5)
+      };
       
       const totalStock = updatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
       const prices = updatedVariants.map(v => v.price || 0).filter(p => p > 0);
@@ -409,17 +433,26 @@ export default function ProductsManager() {
       {/* Modal de variante */}
       {showVariantModal && editingVariantData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-8 shadow-xl animate-scale-in">
-            <h3 className="text-xl font-bold text-gray-800 mb-6 uppercase">Editar Variante</h3>
+          <div className="bg-white rounded-[2rem] max-w-2xl w-full p-8 shadow-2xl animate-scale-in border border-gray-100">
+            <h3 className="text-xl font-black text-gray-800 mb-6 uppercase tracking-tighter flex items-center gap-2">
+              <span className="w-1.5 h-5 bg-green-500 rounded-full"></span>
+              Editar Variante
+            </h3>
             <form onSubmit={(e) => { e.preventDefault(); handleSaveVariant(); }} className="space-y-4">
                 <Input label="Nombre" value={editingVariantData.name || ''} onChange={(e) => setEditingVariantData({...editingVariantData, name: e.target.value})} required />
-                <div className="grid grid-cols-2 gap-4">
-                  <Input label="Precio" type="number" value={editingVariantData.price || 0} onChange={(e) => setEditingVariantData({...editingVariantData, price: parseFloat(e.target.value)})} required />
-                  <Input label="Stock" type="number" value={editingVariantData.stock || 0} onChange={(e) => setEditingVariantData({...editingVariantData, stock: parseInt(e.target.value)})} required />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input label="SKU" value={editingVariantData.sku || ''} onChange={(e) => setEditingVariantData({...editingVariantData, sku: e.target.value})} />
+                  <Input label="Codigo de barras" value={editingVariantData.barcode || ''} onChange={(e) => setEditingVariantData({...editingVariantData, barcode: e.target.value})} />
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <Input label="Precio" type="number" min="0" step="0.01" value={editingVariantData.price ?? ''} onChange={(e) => setEditingVariantData({...editingVariantData, price: e.target.value})} required />
+                  <Input label="Precio compra" type="number" min="0" step="0.01" value={editingVariantData.purchasePrice ?? ''} onChange={(e) => setEditingVariantData({...editingVariantData, purchasePrice: e.target.value})} />
+                  <Input label="Stock" type="number" min="0" value={editingVariantData.stock ?? ''} onChange={(e) => setEditingVariantData({...editingVariantData, stock: e.target.value})} required />
+                  <Input label="Stock minimo" type="number" min="0" value={editingVariantData.minStock ?? 5} onChange={(e) => setEditingVariantData({...editingVariantData, minStock: e.target.value})} />
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <Button type="submit" variant="primary" className="flex-1 bg-green-600 h-12 font-bold">GUARDAR</Button>
-                  <Button type="button" variant="ghost" onClick={() => setShowVariantModal(false)}>Cancelar</Button>
+                  <Button type="submit" variant="primary" className="flex-1 bg-green-600 h-14 rounded-2xl font-black shadow-xl shadow-green-100">GUARDAR</Button>
+                  <Button type="button" variant="ghost" onClick={() => setShowVariantModal(false)} className="h-14 rounded-2xl font-bold">Cancelar</Button>
                 </div>
             </form>
           </div>

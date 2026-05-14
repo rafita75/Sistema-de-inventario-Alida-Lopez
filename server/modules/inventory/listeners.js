@@ -1,8 +1,16 @@
 // server/modules/inventory/listeners.js
+const mongoose = require('mongoose');
 const eventBus = require('../../shared/events');
 const EVENTS = require('../../shared/events.types');
 const Product = require('./models/Product');
 const StockMovement = require('./models/StockMovement');
+
+function toPositiveInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const integer = Math.trunc(parsed);
+  return integer > 0 ? integer : null;
+}
 
 /**
  * Configurar todos los listeners del módulo Inventory
@@ -22,11 +30,22 @@ function setupInventoryListeners() {
     const movements = [];
     
     for (const item of data.items) {
+      const quantity = toPositiveInteger(item.quantity);
+      if (!quantity) {
+        console.error(`❌ Cantidad invalida para item: ${item.name}`);
+        continue;
+      }
+
       let retries = 3;
       let success = false;
 
       while (retries > 0 && !success) {
         try {
+          if (!mongoose.Types.ObjectId.isValid(item.productId)) {
+            console.error(`âŒ Producto invalido: ${item.productId}`);
+            break;
+          }
+
           const product = await Product.findById(item.productId);
           
           if (!product) {
@@ -35,20 +54,30 @@ function setupInventoryListeners() {
           }
           
           let previousStock, newStock;
+          let variantDoc = null;
           let productName = product.name;
           
           // Si tiene variante
           if (item.variantId) {
-            const variant = product.variants.id(item.variantId);
-            if (!variant) {
+            if (!mongoose.Types.ObjectId.isValid(item.variantId)) {
+              console.error(`âŒ Variante invalida: ${item.variantId}`);
+              break;
+            }
+
+            variantDoc = product.variants.id(item.variantId);
+            if (!variantDoc) {
               console.error(`❌ Variante no encontrada: ${item.variantId}`);
               break;
             }
             
-            previousStock = variant.stock;
-            newStock = previousStock - item.quantity;
-            variant.stock = newStock;
-            productName = `${product.name} - ${variant.name}`;
+            previousStock = variantDoc.stock;
+            newStock = previousStock - quantity;
+            if (newStock < 0) {
+              console.error(`❌ Stock insuficiente para variante: ${productName}`);
+              break;
+            }
+            variantDoc.stock = newStock;
+            productName = `${product.name} - ${variantDoc.name}`;
             
             // Actualizar stock total del producto
             const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
@@ -56,7 +85,11 @@ function setupInventoryListeners() {
           } else {
             // Producto normal
             previousStock = product.stock;
-            newStock = previousStock - item.quantity;
+            newStock = previousStock - quantity;
+            if (newStock < 0) {
+              console.error(`❌ Stock insuficiente para producto: ${productName}`);
+              break;
+            }
             product.stock = newStock;
           }
           
@@ -66,9 +99,10 @@ function setupInventoryListeners() {
           // Registrar movimiento de stock
           const movement = new StockMovement({
             productId: product._id,
+            variantId: item.variantId || null,
             productName: productName,
             type: 'sale',
-            quantity: -item.quantity,
+            quantity: -quantity,
             previousStock,
             newStock,
             reason: `Venta #${data.saleNumber} - ${data.clienteNombre || 'Mostrador'}`,
@@ -81,12 +115,12 @@ function setupInventoryListeners() {
           console.log(`✅ Stock actualizado: ${productName} (${previousStock} → ${newStock})`);
           
           // Verificar si hay stock bajo
-          const minStock = product.minStock || 5;
+          const minStock = variantDoc?.minStock || product.minStock || 5;
           if (newStock <= minStock) {
             eventBus.emitSync(EVENTS.LOW_STOCK_ALERT, {
               productId: product._id,
               productName: product.name,
-              variantName: item.variantId ? variant.name : null,
+              variantName: variantDoc ? variantDoc.name : null,
               stock: newStock,
               minStock
             });

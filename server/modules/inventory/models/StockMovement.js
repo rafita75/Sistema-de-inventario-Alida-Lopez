@@ -7,6 +7,10 @@ const StockMovementSchema = new mongoose.Schema({
     ref: 'Product',
     required: true
   },
+  variantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  },
   productName: {
     type: String,
     required: true

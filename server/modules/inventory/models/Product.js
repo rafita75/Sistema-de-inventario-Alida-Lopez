@@ -82,12 +82,24 @@ ProductSchema.pre('save', async function() {
   
   // Generar SKU para variantes nuevas
   if (this.hasVariants && this.variants && this.variants.length > 0 && this.sku) {
+    const usedSkus = new Set(
+      this.variants
+        .map((variant) => variant.sku)
+        .filter(Boolean)
+    );
     let variantIndex = 1;
+
     for (let i = 0; i < this.variants.length; i++) {
       const variant = this.variants[i];
       if (!variant.sku) {
-        variant.sku = `${this.sku}-${String(variantIndex).padStart(2, '0')}`;
-        variantIndex++;
+        let nextSku;
+        do {
+          nextSku = `${this.sku}-${String(variantIndex).padStart(2, '0')}`;
+          variantIndex++;
+        } while (usedSkus.has(nextSku));
+
+        variant.sku = nextSku;
+        usedSkus.add(nextSku);
       }
       // También generar código de barras para variantes si no tienen
       if (!variant.barcode) {

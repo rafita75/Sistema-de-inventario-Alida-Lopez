@@ -16,6 +16,13 @@ const Product = require('../../inventory/models/Product');
 
 const router = express.Router();
 
+function toPositiveInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const integer = Math.trunc(parsed);
+  return integer > 0 ? integer : null;
+}
+
 // ============================================
 // BUSCAR PRODUCTO POR CÓDIGO DE BARRAS
 // ============================================
@@ -104,6 +111,10 @@ router.get("/search", auth, requirePermission('usePOS'), async (req, res) => {
 // ============================================
 router.get("/variants/:productId", auth, requirePermission('usePOS'), async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.productId)) {
+      return res.status(400).json({ error: "Producto invalido" });
+    }
+
     const product = await Product.findById(req.params.productId);
     if (!product) return res.status(404).json({ error: "Producto no encontrado" });
 
@@ -134,7 +145,9 @@ router.post("/sale", auth, requirePermission('usePOS'), async (req, res) => {
     const stockUpdates = [];
 
     for (const item of items) {
-      if (item.quantity <= 0) throw new Error(`Cantidad inválida para ${item.name}`);
+      const quantity = toPositiveInteger(item.quantity);
+      if (!quantity) throw new Error(`Cantidad invalida para ${item.name}`);
+      if (!mongoose.Types.ObjectId.isValid(item.productId)) throw new Error(`Producto invalido: ${item.name}`);
 
       const product = await Product.findById(item.productId).session(session);
       if (!product) throw new Error(`Producto no encontrado: ${item.name}`);
@@ -145,39 +158,45 @@ router.post("/sale", auth, requirePermission('usePOS'), async (req, res) => {
       let previousStock, newStock;
 
       if (item.variantId) {
+        if (!mongoose.Types.ObjectId.isValid(item.variantId)) {
+          throw new Error(`Variante invalida: ${name}`);
+        }
+
         const variant = product.variants.id(item.variantId);
         if (!variant) throw new Error(`Variante no encontrada: ${name}`);
         if (variant.price) price = variant.price;
         sku = variant.sku;
         name = `${product.name} - ${variant.name}`;
         
-        if (variant.stock < item.quantity) throw new Error(`Sin stock para ${name}`);
+        if (variant.stock < quantity) throw new Error(`Sin stock para ${name}`);
 
         previousStock = variant.stock;
-        newStock = previousStock - item.quantity;
+        newStock = previousStock - quantity;
         variant.stock = newStock;
         product.stock = product.variants.reduce((sum, v) => sum + v.stock, 0);
       } else {
-        if (product.stock < item.quantity) throw new Error(`Sin stock para ${product.name}`);
+        if (product.hasVariants) throw new Error(`Selecciona una variante para ${product.name}`);
+        if (product.stock < quantity) throw new Error(`Sin stock para ${product.name}`);
         previousStock = product.stock;
-        newStock = previousStock - item.quantity;
+        newStock = previousStock - quantity;
         product.stock = newStock;
       }
 
-      calculatedTotal += price * item.quantity;
+      calculatedTotal += price * quantity;
       validatedItems.push({
         productId: item.productId,
         variantId: item.variantId || null,
-        name, price, quantity: item.quantity, sku
+        name, price, quantity, sku
       });
 
       await product.save({ session });
 
       stockUpdates.push({
         productId: product._id,
+        variantId: item.variantId || null,
         productName: name,
         type: 'sale',
-        quantity: -item.quantity,
+        quantity: -quantity,
         previousStock, newStock,
         reason: `Venta POS - ${clienteNombre || 'Mostrador'}`,
         userId: req.user.id
