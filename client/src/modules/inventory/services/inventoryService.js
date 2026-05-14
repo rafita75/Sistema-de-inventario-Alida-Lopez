@@ -56,6 +56,16 @@ export const adjustVariantStock = async (productId, variantId, quantity, reason,
   return data;
 };
 
+export const disableProductStockAlert = async (productId) => {
+  const { data } = await api.patch(`/inventory/products/${productId}/stock-alert/disable`);
+  return data;
+};
+
+export const disableVariantStockAlert = async (productId, variantId) => {
+  const { data } = await api.patch(`/inventory/variants/${productId}/${variantId}/stock-alert/disable`);
+  return data;
+};
+
 export const updateMinStock = async (productId, minStock) => {
   const { data } = await api.put(`/inventory/products/${productId}/min-stock`, { minStock });
   return data;

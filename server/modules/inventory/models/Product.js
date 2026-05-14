@@ -9,7 +9,9 @@ const VariantSchema = new mongoose.Schema({
   minStock: { type: Number, default: 5, min: 0 },
   sku: { type: String, default: '' },
   barcode: { type: String, default: '' },
-  image: { type: String, default: '' }
+  image: { type: String, default: '' },
+  stockAlertDisabled: { type: Boolean, default: false },
+  stockAlertDisabledAt: { type: Date, default: null }
 });
 
 const ProductSchema = new mongoose.Schema({
@@ -33,6 +35,9 @@ const ProductSchema = new mongoose.Schema({
   thumbnail: { type: String, default: '' },
   tags: [{ type: String, trim: true }],
   isActive: { type: Boolean, default: true },
+  disabledAt: { type: Date, default: null },
+  stockAlertDisabled: { type: Boolean, default: false },
+  stockAlertDisabledAt: { type: Date, default: null },
   isFeatured: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }

@@ -39,7 +39,9 @@ function normalizeVariant(variant = {}) {
     minStock: toNonNegativeInteger(variant.minStock, 5),
     sku: String(variant.sku || '').trim(),
     barcode: String(variant.barcode || '').trim(),
-    image: variant.image || images[0]?.url || ''
+    image: variant.image || images[0]?.url || '',
+    stockAlertDisabled: variant.stockAlertDisabled === true,
+    stockAlertDisabledAt: variant.stockAlertDisabledAt || null
   };
 
   if (variant._id && mongoose.Types.ObjectId.isValid(variant._id)) {
@@ -71,6 +73,8 @@ function normalizeProductPayload(payload, { keepSku = true } = {}) {
   productData.supplierId = normalizeOptionalId(productData.supplierId);
   productData.categoryId = normalizeOptionalId(productData.categoryId);
   productData.hasVariants = hasVariants;
+  productData.stockAlertDisabled = productData.stockAlertDisabled === true;
+  productData.stockAlertDisabledAt = productData.stockAlertDisabledAt || null;
 
   if (!keepSku || !productData.sku) {
     delete productData.sku;
@@ -133,8 +137,11 @@ function buildInitialInventoryNotes(product) {
 
 router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
   try {
-    const { page = 1, limit = 20, search = '', brand, supplier, stockStatus } = req.query;
-    const query = { isActive: true };
+    const { page = 1, limit = 20, search = '', brand, supplier, stockStatus, showInactive } = req.query;
+    
+    // Si showInactive es true, no filtramos por isActive: true (mostramos todos)
+    // Si es false o no viene, solo mostramos los activos
+    const query = asBoolean(showInactive) ? {} : { isActive: true };
     const filterConditions = [];
     
     if (search) {
@@ -165,11 +172,13 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
       filterConditions.push({ $or: [
         { 
           hasVariants: false, 
+          stockAlertDisabled: { $ne: true },
           $expr: { $lte: ["$stock", { $ifNull: ["$minStock", 5] }] },
           stock: { $gt: 0 }
         },
         {
           hasVariants: true,
+          stockAlertDisabled: { $ne: true },
           "variants.stock": { $gt: 0 },
           $expr: {
             $gt: [
@@ -180,6 +189,7 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
                     as: "v",
                     cond: {
                       $and: [
+                        { $ne: ["$$v.stockAlertDisabled", true] },
                         { $gt: ["$$v.stock", 0] },
                         { $lte: ["$$v.stock", { $ifNull: ["$$v.minStock", { $ifNull: ["$minStock", 5] }] }] }
                       ]
@@ -194,10 +204,11 @@ router.get('/', auth, requirePermission('viewProducts'), async (req, res) => {
       ] });
     } else if (stockStatus === 'empty') {
       filterConditions.push({ $or: [
-        { hasVariants: false, stock: { $lte: 0 } },
+        { hasVariants: false, stockAlertDisabled: { $ne: true }, stock: { $lte: 0 } },
         { 
           hasVariants: true, 
-          variants: { $elemMatch: { stock: { $lte: 0 } } } 
+          stockAlertDisabled: { $ne: true },
+          variants: { $elemMatch: { stockAlertDisabled: { $ne: true }, stock: { $lte: 0 } } } 
         }
       ] });
     }
@@ -313,6 +324,144 @@ router.put('/:id', auth, requirePermission('editProducts'), validateProduct, asy
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al actualizar producto' });
+  }
+});
+
+router.patch('/:id/disable', auth, requirePermission('editProducts'), async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Producto invalido' });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const now = new Date();
+    const oldValue = {
+      isActive: product.isActive,
+      stockAlertDisabled: product.stockAlertDisabled,
+      stockAlertDisabledAt: product.stockAlertDisabledAt,
+      variants: product.hasVariants ? product.variants.map(v => ({
+        _id: v._id,
+        stockAlertDisabled: v.stockAlertDisabled,
+        stockAlertDisabledAt: v.stockAlertDisabledAt
+      })) : []
+    };
+
+    // Deshabilitar el producto
+    product.isActive = false;
+    product.disabledAt = now;
+    product.stockAlertDisabled = true;
+    product.stockAlertDisabledAt = now;
+
+    // Si tiene variantes, también deshabilitar alertas en ellas
+    if (product.hasVariants && Array.isArray(product.variants)) {
+      product.variants = product.variants.map(variant => ({
+        ...variant.toObject ? variant.toObject() : variant,
+        stockAlertDisabled: true,
+        stockAlertDisabledAt: now
+      }));
+    }
+
+    await product.save();
+
+    const newValue = {
+      isActive: product.isActive,
+      disabledAt: product.disabledAt,
+      stockAlertDisabled: product.stockAlertDisabled,
+      stockAlertDisabledAt: product.stockAlertDisabledAt,
+      variants: product.hasVariants ? product.variants.map(v => ({
+        _id: v._id,
+        stockAlertDisabled: v.stockAlertDisabled,
+        stockAlertDisabledAt: v.stockAlertDisabledAt
+      })) : []
+    };
+
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: product._id,
+      entityName: product.name,
+      description: `Deshabilitó el producto: ${product.name}${product.hasVariants ? ` (con ${product.variants.length} variantes)` : ''}`,
+      oldValue,
+      newValue
+    });
+
+    res.json({ product, message: 'Producto deshabilitado correctamente' });
+  } catch (error) {
+    console.error('Error al deshabilitar producto:', error);
+    res.status(500).json({ error: 'Error al deshabilitar producto: ' + error.message });
+  }
+});
+
+router.patch('/:id/enable', auth, requirePermission('editProducts'), async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Producto invalido' });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const oldValue = {
+      isActive: product.isActive,
+      disabledAt: product.disabledAt,
+      stockAlertDisabled: product.stockAlertDisabled,
+      stockAlertDisabledAt: product.stockAlertDisabledAt,
+      variants: product.hasVariants ? product.variants.map(v => ({
+        _id: v._id,
+        stockAlertDisabled: v.stockAlertDisabled,
+        stockAlertDisabledAt: v.stockAlertDisabledAt
+      })) : []
+    };
+
+    // Re-habilitar el producto
+    product.isActive = true;
+    product.disabledAt = null;
+    product.stockAlertDisabled = false;
+    product.stockAlertDisabledAt = null;
+
+    // Si tiene variantes, también re-habilitar alertas en ellas
+    if (product.hasVariants && Array.isArray(product.variants)) {
+      product.variants = product.variants.map(variant => ({
+        ...variant.toObject ? variant.toObject() : variant,
+        stockAlertDisabled: false,
+        stockAlertDisabledAt: null
+      }));
+    }
+
+    await product.save();
+
+    const newValue = {
+      isActive: product.isActive,
+      disabledAt: product.disabledAt,
+      stockAlertDisabled: product.stockAlertDisabled,
+      stockAlertDisabledAt: product.stockAlertDisabledAt,
+      variants: product.hasVariants ? product.variants.map(v => ({
+        _id: v._id,
+        stockAlertDisabled: v.stockAlertDisabled,
+        stockAlertDisabledAt: v.stockAlertDisabledAt
+      })) : []
+    };
+
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: product._id,
+      entityName: product.name,
+      description: `Re-habilitó el producto: ${product.name}${product.hasVariants ? ` (con ${product.variants.length} variantes)` : ''}`,
+      oldValue,
+      newValue
+    });
+
+    res.json({ product, message: 'Producto re-habilitado correctamente' });
+  } catch (error) {
+    console.error('Error al re-habilitar producto:', error);
+    res.status(500).json({ error: 'Error al re-habilitar producto: ' + error.message });
   }
 });
 

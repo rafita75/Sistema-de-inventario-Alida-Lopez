@@ -28,6 +28,18 @@ export const updateProduct = async (id, productData) => {
   return data;
 };
 
+// Deshabilitar producto sin borrar historial
+export const disableProduct = async (id) => {
+  const { data } = await api.patch(`/products/${id}/disable`);
+  return data;
+};
+
+// Re-habilitar producto
+export const enableProduct = async (id) => {
+  const { data } = await api.patch(`/products/${id}/enable`);
+  return data;
+};
+
 // Eliminar producto
 export const deleteProduct = async (id) => {
   const { data } = await api.delete(`/products/${id}`);

@@ -1,6 +1,6 @@
 // client/src/modules/admin/pages/ProductsManager.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { getAdminProducts, deleteProduct, updateProduct } from '../../../shared/services/productService';
+import { getAdminProducts, deleteProduct, updateProduct, disableProduct, enableProduct } from '../../../shared/services/productService';
 import { getCategories } from '../../../shared/services/categoryService';
 import ProductForm from './ProductForm';
 import Button from '../../core/components/UI/Button';
@@ -34,13 +34,18 @@ export default function ProductsManager() {
 
   // Paginación y Búsqueda
   const [search, setSearch] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
   // Estados para Confirmación
   const [confirmDelete, setConfirmDelete] = useState({ open: false, id: null, type: 'product', extra: null });
+  const [confirmDisable, setConfirmDisable] = useState({ open: false, product: null });
+  const [confirmEnable, setConfirmEnable] = useState({ open: false, product: null });
   const [deleting, setDeleting] = useState(false);
+  const [disabling, setDisabling] = useState(false);
+  const [enabling, setEnabling] = useState(false);
 
   const openCreateModal = useCallback(() => {
     setEditingProduct(null);
@@ -63,7 +68,7 @@ export default function ProductsManager() {
     setLoading(true);
     try {
       const [productsData, categoriesData] = await Promise.all([
-        getAdminProducts({ page: currentPage, limit: 15, search }),
+        getAdminProducts({ page: currentPage, limit: 15, search, showInactive }),
         getCategories()
       ]);
       
@@ -82,7 +87,7 @@ export default function ProductsManager() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, notify, search]);
+  }, [currentPage, notify, search, showInactive]);
 
   useEffect(() => {
     loadData();
@@ -120,6 +125,38 @@ export default function ProductsManager() {
       notify('Error al eliminar', 'error');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleConfirmDisable = async () => {
+    if (!confirmDisable.product?._id) return;
+
+    setDisabling(true);
+    try {
+      await disableProduct(confirmDisable.product._id);
+      notify('Producto deshabilitado correctamente', 'success');
+      setConfirmDisable({ open: false, product: null });
+      loadData();
+    } catch (error) {
+      notify(error.response?.data?.error || 'Error al deshabilitar producto', 'error');
+    } finally {
+      setDisabling(false);
+    }
+  };
+
+  const handleConfirmEnable = async () => {
+    if (!confirmEnable.product?._id) return;
+
+    setEnabling(true);
+    try {
+      await enableProduct(confirmEnable.product._id);
+      notify('Producto habilitado correctamente', 'success');
+      setConfirmEnable({ open: false, product: null });
+      loadData();
+    } catch (error) {
+      notify(error.response?.data?.error || 'Error al habilitar producto', 'error');
+    } finally {
+      setEnabling(false);
     }
   };
 
@@ -213,19 +250,35 @@ export default function ProductsManager() {
               <span className="w-1.5 h-4 bg-green-500 rounded-full"></span>
               Filtros y Búsqueda
             </h3>
-            <div className="relative w-full lg:w-96 group">
-               <form onSubmit={handleSearch} className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Input 
-                      placeholder="Buscar producto..." 
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="!mb-0"
-                      icon="🔍"
-                    />
-                  </div>
-                  <Button type="submit" variant="outline" className="shrink-0 h-12 rounded-xl">Buscar</Button>
-               </form>
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
+              <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl">
+                <button 
+                  onClick={() => { setShowInactive(false); setCurrentPage(1); }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${!showInactive ? 'bg-white text-green-700 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                  ACTIVOS
+                </button>
+                <button 
+                  onClick={() => { setShowInactive(true); setCurrentPage(1); }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${showInactive ? 'bg-white text-gray-700 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                  TODOS
+                </button>
+              </div>
+              <div className="relative w-full lg:w-96 group">
+                <form onSubmit={handleSearch} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input 
+                        placeholder="Buscar producto..." 
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="!mb-0"
+                        icon="🔍"
+                      />
+                    </div>
+                    <Button type="submit" variant="outline" className="shrink-0 h-12 rounded-xl">Buscar</Button>
+                </form>
+              </div>
             </div>
         </div>
 
@@ -243,13 +296,13 @@ export default function ProductsManager() {
                     <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Categoría</th>
                     <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Precio</th>
                     <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Stock</th>
-                    <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center w-32">Acciones</th>
+                    <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center w-44">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {products.map((product) => (
                     <React.Fragment key={product._id}>
-                      <tr className="hover:bg-gray-50 transition cursor-pointer" onClick={() => product.hasVariants && toggleExpand(product._id)}>
+                      <tr className={`hover:bg-gray-50 transition cursor-pointer ${!product.isActive ? 'opacity-60 bg-gray-50/50' : ''}`} onClick={() => product.hasVariants && toggleExpand(product._id)}>
                         <td className="p-4">
                           {product.thumbnail ? (
                             <img src={product.thumbnail} alt={product.name} className="w-10 h-10 object-cover rounded-xl" />
@@ -258,11 +311,12 @@ export default function ProductsManager() {
                           )}
                         </td>
                         <td className="p-4">
-                          <div className="font-bold text-gray-800">
+                          <div className="font-bold text-gray-800 flex items-center gap-2">
                              {product.hasVariants && (
-                               <span className="mr-2 text-gray-400">{expandedProducts[product._id] ? '▼' : '▶'}</span>
+                               <span className="text-gray-400">{expandedProducts[product._id] ? '▼' : '▶'}</span>
                              )}
                              {product.name}
+                             {!product.isActive && <span className="text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-black uppercase">Inactivo</span>}
                           </div>
                           <div className="text-[10px] text-gray-400 font-mono">SKU: {product.sku || '—'}</div>
                         </td>
@@ -277,8 +331,13 @@ export default function ProductsManager() {
                         </td>
                         <td className="p-4">
                           <div className="flex justify-center gap-2">
-                            <button onClick={(e) => openEditModal(product, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-all">✏️</button>
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmDelete({ open: true, id: product._id, type: 'product' }); }} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-all">🗑️</button>
+                            <button title="Editar" onClick={(e) => openEditModal(product, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-all">✏️</button>
+                            {product.isActive ? (
+                              <button title="Deshabilitar" onClick={(e) => { e.stopPropagation(); setConfirmDisable({ open: true, product }); }} className="p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800 rounded-xl transition-all">⏸</button>
+                            ) : (
+                              <button title="Habilitar" onClick={(e) => { e.stopPropagation(); setConfirmEnable({ open: true, product }); }} className="p-2 text-green-600 hover:bg-green-50 rounded-xl transition-all">▶️</button>
+                            )}
+                            <button title="Eliminar" onClick={(e) => { e.stopPropagation(); setConfirmDelete({ open: true, id: product._id, type: 'product' }); }} className="p-2 text-red-600 hover:bg-red-50 rounded-xl transition-all">🗑️</button>
                           </div>
                         </td>
                       </tr>
@@ -316,7 +375,7 @@ export default function ProductsManager() {
                   <div className="py-20 text-center text-gray-400 italic">No se encontraron productos</div>
                 ) : (
                   products.map(product => (
-                    <Card key={product._id} className="p-5 border-l-4 border-l-green-500 rounded-[2rem] shadow-sm">
+                    <Card key={product._id} className={`p-5 border-l-4 rounded-[2rem] shadow-sm ${!product.isActive ? 'border-l-gray-300 opacity-75' : 'border-l-green-500'}`}>
                         <div className="flex justify-between items-start mb-4">
                           <div className="flex gap-4">
                              <div className="w-14 h-14 bg-gray-100 rounded-2xl flex items-center justify-center overflow-hidden">
@@ -325,6 +384,7 @@ export default function ProductsManager() {
                              <div>
                                 <h4 className="font-bold text-gray-800 leading-tight truncate max-w-[150px]">{product.name}</h4>
                                 <p className="text-[10px] text-gray-400 font-mono mt-1">{product.sku || 'SIN SKU'}</p>
+                                {!product.isActive && <span className="text-[8px] bg-gray-200 text-gray-500 px-1 py-0.5 rounded font-black uppercase mt-1 inline-block">Inactivo</span>}
                              </div>
                           </div>
                           <div className="text-right">
@@ -335,8 +395,13 @@ export default function ProductsManager() {
                           </div>
                         </div>
                         
-                        <div className="flex gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                            <Button variant="outline" size="sm" onClick={(e) => openEditModal(product, e)} className="flex-1 rounded-xl text-[10px] font-bold">EDITAR</Button>
+                           {product.isActive ? (
+                             <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setConfirmDisable({ open: true, product }); }} className="flex-1 rounded-xl text-[10px] font-bold bg-gray-100 text-gray-500">OFF</Button>
+                           ) : (
+                             <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setConfirmEnable({ open: true, product }); }} className="flex-1 rounded-xl text-[10px] font-bold bg-green-50 text-green-600">ON</Button>
+                           )}
                            <Button variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); setConfirmDelete({ open: true, id: product._id, type: 'product' }); }} className="flex-1 rounded-xl text-[10px] font-bold">BORRAR</Button>
                         </div>
 
@@ -468,6 +533,28 @@ export default function ProductsManager() {
         message="Esta acción es irreversible."
         confirmText="Sí, eliminar"
         type="danger"
+      />
+
+      <ConfirmModal
+        isOpen={confirmDisable.open}
+        onClose={() => setConfirmDisable({ open: false, product: null })}
+        onConfirm={handleConfirmDisable}
+        loading={disabling}
+        title="Deshabilitar producto"
+        message={`"${confirmDisable.product?.name || 'Este producto'}" saldra del catalogo activo y dejara de generar alertas, pero no se borrara su historial ni movimientos.`}
+        confirmText="Deshabilitar"
+        type="warning"
+      />
+
+      <ConfirmModal
+        isOpen={confirmEnable.open}
+        onClose={() => setConfirmEnable({ open: false, product: null })}
+        onConfirm={handleConfirmEnable}
+        loading={enabling}
+        title="Habilitar producto"
+        message={`"${confirmEnable.product?.name || 'Este producto'}" volverá al catálogo activo y se reactivarán sus alertas de stock.`}
+        confirmText="Habilitar"
+        type="success"
       />
     </div>
   );

@@ -270,8 +270,10 @@ router.get('/dashboard-stats', auth, requirePermission('viewAccounting'), async 
 
     let productosBajoStock = 0;
     products.forEach(p => {
+      if (p.stockAlertDisabled === true) return;
+
       if (p.hasVariants) {
-        const lowVariants = p.variants.filter(v => v.stock <= (v.minStock || p.minStock || 5));
+        const lowVariants = p.variants.filter(v => v.stockAlertDisabled !== true && v.stock <= (v.minStock || p.minStock || 5));
         productosBajoStock += lowVariants.length;
       } else {
         if (p.stock <= (p.minStock || 5)) {

@@ -6,6 +6,7 @@ const auth = require('../../login/middleware/auth');
 const Product = mongoose.model('Product');
 const eventBus = require('../../../shared/events');
 const EVENTS = require('../../../shared/events.types');
+const { logAudit } = require('../../core/utils/logger');
 
 const router = express.Router();
 
@@ -92,13 +93,16 @@ router.get('/low-stock', auth, async (req, res) => {
     }
     
     // Obtenemos todos los productos activos
-    const allProducts = await Product.find({ isActive: true }).populate('categoryId');
+    const allProducts = await Product.find({
+      isActive: true,
+      stockAlertDisabled: { $ne: true }
+    }).populate('categoryId');
     
     // Filtramos manualmente para incluir lógica de variantes
     const lowStockItems = allProducts.filter(p => {
       if (p.hasVariants) {
         // Si tiene variantes, vemos si al menos una está baja de stock
-        return p.variants.some(v => v.stock <= (v.minStock || p.minStock || 5));
+        return p.variants.some(v => v.stockAlertDisabled !== true && v.stock <= (v.minStock || p.minStock || 5));
       } else {
         // Si es producto simple
         return p.stock <= (p.minStock || 5);
@@ -126,22 +130,30 @@ router.get('/summary', auth, async (req, res) => {
     const totalVariants = productsWithVariants.reduce((sum, p) => sum + (p.variants?.length || 0), 0);
     const lowStockVariants = productsWithVariants.reduce((sum, product) => (
       sum + product.variants.filter((variant) => (
+        product.stockAlertDisabled !== true &&
+        variant.stockAlertDisabled !== true &&
         variant.stock > 0 && variant.stock <= (variant.minStock || product.minStock || 5)
       )).length
     ), 0);
     const outOfStockVariants = productsWithVariants.reduce((sum, product) => (
-      sum + product.variants.filter((variant) => variant.stock === 0).length
+      sum + product.variants.filter((variant) => (
+        product.stockAlertDisabled !== true &&
+        variant.stockAlertDisabled !== true &&
+        variant.stock === 0
+      )).length
     ), 0);
     
     const lowStockProducts = await Product.countDocuments({
       isActive: true,
       hasVariants: { $ne: true },
+      stockAlertDisabled: { $ne: true },
       stock: { $gt: 0 },
       $expr: { $lte: ['$stock', { $ifNull: ['$minStock', 5] }] }
     });
     const outOfStock = await Product.countDocuments({
       isActive: true,
       hasVariants: { $ne: true },
+      stockAlertDisabled: { $ne: true },
       stock: 0
     });
     
@@ -305,17 +317,116 @@ router.get('/sales', auth, async (req, res) => {
   }
 });
 
+router.patch('/products/:id/stock-alert/disable', auth, async (req, res) => {
+  try {
+    if (!canAdjustStock(req)) {
+      return res.status(403).json({ error: 'No tienes permiso para ajustar alertas de stock' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Producto invalido' });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const oldValue = {
+      stockAlertDisabled: product.stockAlertDisabled,
+      stockAlertDisabledAt: product.stockAlertDisabledAt
+    };
+
+    product.stockAlertDisabled = true;
+    product.stockAlertDisabledAt = new Date();
+    await product.save();
+
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: product._id,
+      entityName: product.name,
+      description: `Deshabilito la alerta de stock para: ${product.name}`,
+      oldValue,
+      newValue: {
+        stockAlertDisabled: product.stockAlertDisabled,
+        stockAlertDisabledAt: product.stockAlertDisabledAt
+      }
+    });
+
+    res.json({ product, message: 'Alerta de stock deshabilitada' });
+  } catch (error) {
+    console.error('Error al deshabilitar alerta:', error);
+    res.status(500).json({ error: 'Error al deshabilitar alerta de stock' });
+  }
+});
+
+router.patch('/variants/:productId/:variantId/stock-alert/disable', auth, async (req, res) => {
+  try {
+    if (!canAdjustStock(req)) {
+      return res.status(403).json({ error: 'No tienes permiso para ajustar alertas de stock' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.productId) || !mongoose.Types.ObjectId.isValid(req.params.variantId)) {
+      return res.status(400).json({ error: 'Producto o variante invalida' });
+    }
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    const variant = product.variants.id(req.params.variantId);
+    if (!variant) {
+      return res.status(404).json({ error: 'Variante no encontrada' });
+    }
+
+    const oldValue = {
+      stockAlertDisabled: variant.stockAlertDisabled,
+      stockAlertDisabledAt: variant.stockAlertDisabledAt
+    };
+
+    variant.stockAlertDisabled = true;
+    variant.stockAlertDisabledAt = new Date();
+    await product.save();
+
+    await logAudit(req, {
+      action: 'UPDATE',
+      module: 'INVENTORY',
+      entityId: product._id,
+      entityName: `${product.name} - ${variant.name}`,
+      description: `Deshabilito la alerta de stock para variante: ${product.name} - ${variant.name}`,
+      oldValue,
+      newValue: {
+        stockAlertDisabled: variant.stockAlertDisabled,
+        stockAlertDisabledAt: variant.stockAlertDisabledAt
+      }
+    });
+
+    res.json({ product, variant, message: 'Alerta de variante deshabilitada' });
+  } catch (error) {
+    console.error('Error al deshabilitar alerta de variante:', error);
+    res.status(500).json({ error: 'Error al deshabilitar alerta de variante' });
+  }
+});
+
 router.get('/low-stock-variants', auth, async (req, res) => {
   try {
     if (!canViewInventory(req)) {
       return res.status(403).json({ error: 'No tienes permiso para ver inventario' });
     }
     
-    const products = await Product.find({ hasVariants: true, isActive: true });
+    const products = await Product.find({
+      hasVariants: true,
+      isActive: true,
+      stockAlertDisabled: { $ne: true }
+    });
     const lowStockVariants = [];
     
     for (const product of products) {
       for (const variant of product.variants) {
+        if (variant.stockAlertDisabled === true) continue;
+
         const minStock = variant.minStock || product.minStock || 5;
         if (variant.stock <= minStock) {
           lowStockVariants.push({
